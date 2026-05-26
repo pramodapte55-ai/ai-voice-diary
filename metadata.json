@@ -1,0 +1,6 @@
+{
+  "name": "Voice Memory Ledger",
+  "description": "An AI-powered voice logging database that saves facts or answers questions using OpenAI Whisper and Google Gemini.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
