@@ -95,7 +95,17 @@ export default function App() {
     setIsFetchingMemories(true);
     try {
       const res = await fetch("/api/memories");
-      const data = await res.json();
+      const resText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(resText);
+      } catch (parseErr) {
+        if (resText.includes("<html") || resText.includes("<!DOCTYPE")) {
+          const cleanText = resText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          throw new Error(`Server HTML error: ${cleanText.substring(0, 150)}`);
+        }
+        throw new Error(`Invalid format returned: ${resText.substring(0, 150)}`);
+      }
       if (data.success) {
         setMemories(data.memories);
       }
@@ -131,18 +141,21 @@ export default function App() {
     addLog("Status: Listening... Speak your statement or question clearly into the mic.");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Capture mono stream to reduce initial recording overhead/data size
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { channelCount: 1 } 
+      });
       
-      // Select browser standard supported container format
-      let options = {};
+      // Select browser standard supported container format with low bitrate compression
+      let options: any = {};
       if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) {
-        options = { mimeType: "audio/webm;codecs=opus" };
+        options = { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 24000 };
       } else if (MediaRecorder.isTypeSupported("audio/webm")) {
-        options = { mimeType: "audio/webm" };
+        options = { mimeType: "audio/webm", audioBitsPerSecond: 24000 };
       } else if (MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")) {
-        options = { mimeType: "audio/ogg;codecs=opus" };
+        options = { mimeType: "audio/ogg;codecs=opus", audioBitsPerSecond: 24000 };
       } else if (MediaRecorder.isTypeSupported("audio/mp4")) {
-        options = { mimeType: "audio/mp4" };
+        options = { mimeType: "audio/mp4", audioBitsPerSecond: 24000 };
       }
 
       const recorder = new MediaRecorder(stream, options);
@@ -225,10 +238,22 @@ export default function App() {
         body: formData,
       });
 
-      const result = await response.json();
+      const responseText = await response.text();
+      let result: any;
+      try {
+        result = JSON.parse(responseText);
+      } catch (parseErr) {
+        if (responseText.includes("<html") || responseText.includes("<!DOCTYPE")) {
+          const cleanText = responseText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          const displayError = cleanText.substring(0, 300) || "Received HTML page from server instead of JSON.";
+          throw new Error(`Server returned HTML error page (Vercel serverless timeout or limit exceeded): ${displayError}`);
+        } else {
+          throw new Error(`Server responded with non-JSON format: ${responseText.substring(0, 300)}`);
+        }
+      }
 
       if (!response.ok || !result.success) {
-        throw new Error(result.error || "Cognitive pipeline failed to process request.");
+        throw new Error(result?.error || "Cognitive pipeline failed to process request.");
       }
 
       // Add dynamic terminal feedback based on returned backend transaction properties
@@ -260,7 +285,17 @@ export default function App() {
   const deleteMemory = async (id: number) => {
     try {
       const resp = await fetch(`/api/memories/${id}`, { method: "DELETE" });
-      const data = await resp.json();
+      const respText = await resp.text();
+      let data: any;
+      try {
+        data = JSON.parse(respText);
+      } catch (pe) {
+        if (respText.includes("<html") || respText.includes("<!DOCTYPE")) {
+          const cleanText = respText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+          throw new Error(`Server HTML error: ${cleanText.substring(0, 150)}`);
+        }
+        throw new Error(`Invalid format returned: ${respText.substring(0, 150)}`);
+      }
       if (data.success) {
         addLog(`Status: Removed memory record ID [${id}] from SQLite filesystem.`);
         // Redraw list without the row
@@ -268,8 +303,9 @@ export default function App() {
       } else {
         alert(data.error || "Could not delete record.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Delete call aborted:", err);
+      alert(err.message || "An unexpected error occurred during record deletion.");
     }
   };
 
