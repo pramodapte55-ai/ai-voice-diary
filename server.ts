@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import cors from "cors";
 import multer from "multer";
-import Database from "better-sqlite3";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
@@ -16,19 +15,29 @@ const PORT = 3000;
 // Enable CORS middleware for browser sandboxes
 app.use(cors());
 
-// Initialize SQLite database
-const db = new Database("ledger.db");
-db.pragma("journal_mode = WAL");
+// Setup Vercel-safe in-memory memory storage interface
+interface Memory {
+  id: number;
+  timestamp: string;
+  category: string;
+  memory: string;
+}
 
-// Setup memory schema
-db.exec(`
-  CREATE TABLE IF NOT EXISTS memories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    category TEXT NOT NULL,
-    memory TEXT NOT NULL
-  )
-`);
+let memoriesIdCounter = 1;
+let memories: Memory[] = [
+  {
+    id: memoriesIdCounter++,
+    timestamp: new Date().toISOString(),
+    category: "पुस्तके",
+    memory: "माझी पुस्तके कपाटात ठेवली आहेत."
+  },
+  {
+    id: memoriesIdCounter++,
+    timestamp: new Date(Date.now() - 600000).toISOString(),
+    category: "बँक",
+    memory: "मी आज बँकेत गेलो होतो. पैशांचे व्यवहार व्यवस्थित झाले."
+  }
+];
 
 // Setup multer for in-memory audio storage
 const upload = multer({
@@ -59,11 +68,10 @@ const getGeminiClient = (apiKey?: string) => {
 // API Endpoint: Get the list of all logged memories
 app.get("/api/memories", (req, res) => {
   try {
-    const stmt = db.prepare("SELECT * FROM memories ORDER BY timestamp DESC");
-    const rows = stmt.all();
+    const rows = [...memories].sort((a, b) => b.id - a.id);
     res.json({ success: true, memories: rows });
   } catch (error: any) {
-    console.error("Database retrieval error:", error);
+    console.error("Memory retrieval error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -71,16 +79,16 @@ app.get("/api/memories", (req, res) => {
 // API Endpoint: Delete a memory by ID
 app.delete("/api/memories/:id", (req, res) => {
   try {
-    const { id } = req.params;
-    const stmt = db.prepare("DELETE FROM memories WHERE id = ?");
-    const result = stmt.run(id);
-    if (result.changes > 0) {
+    const targetId = parseInt(req.params.id, 10);
+    const initialLength = memories.length;
+    memories = memories.filter((m) => m.id !== targetId);
+    if (memories.length < initialLength) {
       res.json({ success: true, message: "Memory record successfully removed." });
     } else {
       res.status(404).json({ success: false, error: "Record not found." });
     }
   } catch (error: any) {
-    console.error("Database deletion error:", error);
+    console.error("Memory deletion error:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -261,9 +269,14 @@ Output format rules based on the detected intent:
       const category = (planData.category || "General").trim();
       const memory = (planData.memory || transcription).trim();
 
-      console.log(`Saving new memory: category=${category}, text="${memory}"`);
-      const insertStmt = db.prepare("INSERT INTO memories (category, memory) VALUES (?, ?)");
-      const result = insertStmt.run(category, memory);
+      console.log(`Saving new memory in-memory: category=${category}, text="${memory}"`);
+      const newRecord: Memory = {
+        id: memoriesIdCounter++,
+        timestamp: new Date().toISOString(),
+        category,
+        memory,
+      };
+      memories.push(newRecord);
 
       // Extract generated multilingual confirmation message or fallback
       const finalMsg = planData.message && planData.message.trim()
@@ -276,7 +289,7 @@ Output format rules based on the detected intent:
         transcription,
         providerUsed,
         data: {
-          id: result.lastInsertRowid,
+          id: newRecord.id,
           category,
           memory,
         },
@@ -288,8 +301,7 @@ Output format rules based on the detected intent:
       console.log(`Executing semantic search for query keyword: "${query}"`);
 
       // Retrieve all records to let GPT-4o perform semantic search & inflection resolution
-      const stmt = db.prepare("SELECT * FROM memories ORDER BY timestamp DESC");
-      const allRecords = stmt.all();
+      const allRecords = [...memories].sort((a, b) => b.id - a.id);
 
       const searchPrompt = `You are an expert AI search engine for a personal voice memory ledger.
 The user is asking a question: "${transcription}"
