@@ -23,21 +23,30 @@ interface Memory {
   memory: string;
 }
 
+// Define a clean, global in-memory array at the very top of the file, outside any handler functions.
+let memoryLedger: Memory[] = [];
 let memoriesIdCounter = 1;
-let memories: Memory[] = [
-  {
-    id: memoriesIdCounter++,
-    timestamp: new Date().toISOString(),
-    category: "पुस्तके",
-    memory: "माझी पुस्तके कपाटात ठेवली आहेत."
-  },
-  {
-    id: memoriesIdCounter++,
-    timestamp: new Date(Date.now() - 600000).toISOString(),
-    category: "बँक",
-    memory: "मी आज बँकेत गेलो होतो. पैशांचे व्यवहार व्यवस्थित झाले."
-  }
-];
+
+try {
+  // Wrap the entire initialization block in a try/catch, completely avoiding any fs or startup disk checks
+  memoryLedger = [
+    {
+      id: memoriesIdCounter++,
+      timestamp: new Date().toISOString(),
+      category: "पुस्तके",
+      memory: "माझी पुस्तके कपाटात ठेवली आहेत."
+    },
+    {
+      id: memoriesIdCounter++,
+      timestamp: new Date(Date.now() - 600000).toISOString(),
+      category: "बँक",
+      memory: "मी आज बँकेत गेलो होतो. पैशांचे व्यवहार व्यवस्थित झाले."
+    }
+  ];
+} catch (initErr) {
+  console.error("Graceful initialization handling:", initErr);
+  memoryLedger = [];
+}
 
 // Setup multer for in-memory audio storage
 const upload = multer({
@@ -68,7 +77,7 @@ const getGeminiClient = (apiKey?: string) => {
 // API Endpoint: Get the list of all logged memories
 app.get("/api/memories", (req, res) => {
   try {
-    const rows = [...memories].sort((a, b) => b.id - a.id);
+    const rows = [...memoryLedger].sort((a, b) => b.id - a.id);
     res.json({ success: true, memories: rows });
   } catch (error: any) {
     console.error("Memory retrieval error:", error);
@@ -80,9 +89,9 @@ app.get("/api/memories", (req, res) => {
 app.delete("/api/memories/:id", (req, res) => {
   try {
     const targetId = parseInt(req.params.id, 10);
-    const initialLength = memories.length;
-    memories = memories.filter((m) => m.id !== targetId);
-    if (memories.length < initialLength) {
+    const initialLength = memoryLedger.length;
+    memoryLedger = memoryLedger.filter((m) => m.id !== targetId);
+    if (memoryLedger.length < initialLength) {
       res.json({ success: true, message: "Memory record successfully removed." });
     } else {
       res.status(404).json({ success: false, error: "Record not found." });
@@ -276,7 +285,7 @@ Output format rules based on the detected intent:
         category,
         memory,
       };
-      memories.push(newRecord);
+      memoryLedger.push(newRecord);
 
       // Extract generated multilingual confirmation message or fallback
       const finalMsg = planData.message && planData.message.trim()
@@ -301,7 +310,7 @@ Output format rules based on the detected intent:
       console.log(`Executing semantic search for query keyword: "${query}"`);
 
       // Retrieve all records to let GPT-4o perform semantic search & inflection resolution
-      const allRecords = [...memories].sort((a, b) => b.id - a.id);
+      const allRecords = [...memoryLedger].sort((a, b) => b.id - a.id);
 
       const searchPrompt = `You are an expert AI search engine for a personal voice memory ledger.
 The user is asking a question: "${transcription}"
@@ -425,12 +434,16 @@ async function startServer() {
     });
   }
 
-  // Start full stack server on port 3000
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Voice Memory Ledger Server listening at http://localhost:${PORT}`);
-  });
+  // Start full stack server on port 3000 if not in a serverless function environment
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Voice Memory Ledger Server listening at http://localhost:${PORT}`);
+    });
+  }
 }
 
 startServer().catch((err) => {
   console.error("Failed to bootstrap server:", err);
 });
+
+export default app;
