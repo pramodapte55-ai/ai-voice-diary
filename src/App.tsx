@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Mic, 
   Square, 
@@ -17,7 +17,7 @@ import {
   EyeOff,
   Terminal,
   KeyRound,
-  FileCheck
+  Sliders
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -41,7 +41,7 @@ interface SystemResponse {
 }
 
 // @ts-ignore
-const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
+const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || "";
 
 export default function App() {
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "processing">("idle");
@@ -52,23 +52,29 @@ export default function App() {
   const [recordingDuration, setRecordingDuration] = useState(0);
 
   // User Profile multi-tenancy identification key
-  const [userId, setUserId] = useState(() => localStorage.getItem("voice_ledger_user_id") || "Pramod");
+  const [userId, setUserId] = useState(() => localStorage.getItem("voice_ledger_user_id") || "");
+  const [isEditingName, setIsEditingName] = useState(() => !localStorage.getItem("voice_ledger_user_id"));
+  const [tempName, setTempName] = useState(() => localStorage.getItem("voice_ledger_user_id") || "");
 
   // API Key local persistence states
   const [openAiKey, setOpenAiKey] = useState(() => localStorage.getItem("voice_ledger_openai_key") || "");
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("voice_ledger_gemini_key") || "");
   const [showOpenAiKey, setShowOpenAiKey] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [showApiKeysSetting, setShowApiKeysSetting] = useState(false);
 
   // Status logs console terminal states
   const [statusLogs, setStatusLogs] = useState<string[]>([]);
+  
+  // Mobile UI Tab selection state (for low-height responsive scaling)
+  const [activeMobileTab, setActiveMobileTab] = useState<"insights" | "ledger">("insights");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const durationIntervalRef = useRef<any>(null);
   const logTerminalEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Automatically scroll log console terminal to bottom when new logs stream in
+  // Scroll log console terminal to bottom on change
   useEffect(() => {
     if (logTerminalEndRef.current) {
       logTerminalEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -81,10 +87,25 @@ export default function App() {
     setStatusLogs((prev) => [...prev, `[${timestamp}] ${message}`]);
   };
 
-  // Safe localStorage state updater for keys
-  const handleUserIdChange = (val: string) => {
-    setUserId(val);
-    localStorage.setItem("voice_ledger_user_id", val);
+  const handleNameSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = tempName.trim();
+    if (!clean) {
+      alert("Please provide a valid session profile ID.");
+      return;
+    }
+    setUserId(clean);
+    localStorage.setItem("voice_ledger_user_id", clean);
+    setIsEditingName(false);
+    addLog(`Status: Connected to isolated sandbox profile "[${clean}]"`);
+  };
+
+  const clearSessionProfile = () => {
+    localStorage.removeItem("voice_ledger_user_id");
+    setUserId("");
+    setTempName("");
+    setIsEditingName(true);
+    addLog("Status: Logged out from current session profile.");
   };
 
   const handleOpenAiKeyChange = (val: string) => {
@@ -101,13 +122,14 @@ export default function App() {
     setStatusLogs([]);
   };
 
-  // Fetch SQLite memory ledger list
+  // Fetch SQLite memory ledger list based on current active user
   const fetchMemories = async () => {
+    if (!userId.trim()) return;
     setIsFetchingMemories(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/memories`, {
         headers: {
-          "x-user-id": (userId || "").trim() || "default"
+          "x-user-id": userId.trim()
         }
       });
       const resText = await res.text();
@@ -132,7 +154,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchMemories();
+    if (userId) {
+      fetchMemories();
+    }
   }, [userId]);
 
   useEffect(() => {
@@ -150,16 +174,19 @@ export default function App() {
 
   // Begin capturing native microphone stream
   const startRecording = async () => {
+    if (!userId.trim()) {
+      setErrorMessage("Please set a valid session profile at the top first.");
+      return;
+    }
     setErrorMessage(null);
     setSystemResponse(null);
     audioChunksRef.current = [];
     setRecordingDuration(0);
     
-    // Log listening state
-    addLog("Status: Listening... Speak your statement or question clearly into the mic.");
+    addLog(`Status: Recording session for [${userId}] active! Speak clearly into the microphone.`);
 
     try {
-      // Capture mono stream to reduce initial recording overhead/data size
+      // Capture mono stream to reduce initial recording overhead
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { channelCount: 1 } 
       });
@@ -186,7 +213,7 @@ export default function App() {
       };
 
       recorder.onstop = async () => {
-        addLog("Status: Speech captured. Packaging raw audio buffer chunks...");
+        addLog("Status: Speech capture completed. Processing audio tracks...");
         const audioBlob = new Blob(audioChunksRef.current, { 
           type: recorder.mimeType || "audio/webm" 
         });
@@ -207,7 +234,7 @@ export default function App() {
 
     } catch (err: any) {
       console.error("Mic Capture Error:", err);
-      const captureErrorMsg = "Could not access your microphone. Please verify site permissions in your browser's address bar.";
+      const captureErrorMsg = "Microphone capture aborted. Check browser security settings in your URL domain lock.";
       setErrorMessage(captureErrorMsg);
       addLog(`Status: Mic Error - ${captureErrorMsg}`);
       setRecordingState("idle");
@@ -217,7 +244,7 @@ export default function App() {
   // Cease recording and trigger the stop callback (which fires the AI pipeline)
   const stopRecording = () => {
     if (mediaRecorderRef.current && recordingState === "recording") {
-      addLog("Status: Ceased audio capture. Resolving audio stream...");
+      addLog("Status: Finalizing speech payload. Sending buffers...");
       mediaRecorderRef.current.stop();
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
@@ -228,22 +255,15 @@ export default function App() {
   // Transmit raw audio data blob to backend Express REST controller
   const uploadAndProcessAudio = async (audioBlob: Blob) => {
     setRecordingState("processing");
-    addLog("Status: Distributing payload to Server Node endpoint /api/process-voice...");
+    addLog("Status: Uploading audio buffer payload to cloud engine endpoint /api/process-voice...");
     
-    // Choose logs representation based on whether custom OpenAI keys are initialized
-    if (openAiKey.trim()) {
-      addLog("Status: Dispatching payload to OpenAI Whisper API for transcription...");
-    } else {
-      addLog("Status: Route configured for active Google Gemini transcription fallback...");
-    }
-
     try {
       const formData = new FormData();
       formData.append("audio", audioBlob, "recording.webm");
 
       // Set dynamic header configurations
       const headers: Record<string, string> = {
-        "x-user-id": (userId || "").trim() || "default"
+        "x-user-id": userId.trim() || "default"
       };
       if (openAiKey.trim()) {
         headers["x-openai-key"] = openAiKey.trim();
@@ -265,39 +285,42 @@ export default function App() {
       } catch (parseErr) {
         if (responseText.includes("<html") || responseText.includes("<!DOCTYPE")) {
           const cleanText = responseText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-          const displayError = cleanText.substring(0, 300) || "Received HTML page from server instead of JSON.";
-          throw new Error(`Server returned HTML error page (Vercel serverless timeout or limit exceeded): ${displayError}`);
+          const displayError = cleanText.substring(0, 150) || "Received HTML page from server instead of JSON.";
+          throw new Error(`Server returned HTML error page (timeout or quota lock): ${displayError}`);
         } else {
-          throw new Error(`Server responded with non-JSON format: ${responseText.substring(0, 300)}`);
+          throw new Error(`Server responded with non-JSON format: ${responseText.substring(0, 150)}`);
         }
       }
 
       if (!response.ok || !result.success) {
-        throw new Error(result?.error || "Cognitive pipeline failed to process request.");
+        throw new Error(result?.error || "Voice parsing cognitive pipeline failed.");
       }
 
       // Add dynamic terminal feedback based on returned backend transaction properties
-      addLog(`Status: Transcribed text found: "${result.transcription}"`);
-      addLog("Status: Asking Gemini to route cognitive intent...");
+      addLog(`Status: Resolved transcription: "${result.transcription}"`);
+      addLog(`Status: Cognitive routing active. Target action: ${result.action}`);
 
       if (result.action === "SAVE") {
-        addLog(`Status: Successfully saved to ledger! Action: SAVE | Category: [${result.category}]`);
+        addLog(`Status: Memory persisted under category "[${result.category}]" successfully.`);
       } else if (result.action === "SEARCH") {
-        addLog(`Status: Successfully resolved ledger search query! Found ${result.matchedCount || 0} relative match(es) in database.`);
+        addLog(`Status: Search resolved. Found ${result.matchedCount || 0} relational records.`);
       }
 
       setSystemResponse(result);
-      fetchMemories(); // Instantly synchronize UI grid
+      
+      // Auto toggle to insights tab so the user sees the cognitive outputs instantly on mobile
+      setActiveMobileTab("insights");
+      
+      // Instantly synchronize UI sqlite table logs
+      fetchMemories();
     } catch (err: any) {
       console.error("Upload failure:", err);
       const errTxt = err.message || "An unexpected error occurred during transcription.";
       setErrorMessage(errTxt);
-      addLog(`Status: Error processing voice - ${errTxt}`);
+      addLog(`Status: Cognitive Pipeline Error - ${errTxt}`);
       setRecordingState("idle");
     } finally {
-      if (recordingState !== "recording") {
-        setRecordingState("idle");
-      }
+      setRecordingState("idle");
     }
   };
 
@@ -307,7 +330,7 @@ export default function App() {
       const resp = await fetch(`${API_BASE_URL}/api/memories/${id}`, { 
         method: "DELETE",
         headers: {
-          "x-user-id": (userId || "").trim() || "default"
+          "x-user-id": userId.trim() || "default"
         }
       });
       const respText = await resp.text();
@@ -322,8 +345,7 @@ export default function App() {
         throw new Error(`Invalid format returned: ${respText.substring(0, 150)}`);
       }
       if (data.success) {
-        addLog(`Status: Removed memory record ID [${id}] from SQLite filesystem.`);
-        // Redraw list without the row
+        addLog(`Status: Successfully deleted entry ID [${id}] from SQLite registry files.`);
         setMemories((prev) => prev.filter((m) => m.id !== id));
       } else {
         alert(data.error || "Could not delete record.");
@@ -335,455 +357,456 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white pb-16 antialiased">
-      {/* Decorative background grid and ambient lighting */}
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(99,102,241,0.08),transparent_50%),radial-gradient(circle_at_70%_80%,rgba(239,68,68,0.05),transparent_50%)] pointer-events-none" />
+    <div className="h-screen w-full flex flex-col bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white overflow-hidden relative antialiased leading-relaxed">
       
-      {/* TOP NAVIGATION HEADER */}
-      <header className="relative max-w-7xl mx-auto px-6 py-6 md:py-8 flex flex-col sm:flex-row items-center justify-between border-b border-slate-900 gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
-            <Database className="w-6 h-6 text-indigo-400" />
+      {/* Dynamic atmospheric grid context lights */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_15%,rgba(99,102,241,0.08),transparent_40%),radial-gradient(circle_at_80%_80%,rgba(239,68,68,0.03),transparent_40%)] pointer-events-none z-0" />
+
+      {/* 1. TOP-BAR LEAF HEADER (Flexible shrink-0 bounds) */}
+      <header className="relative shrink-0 bg-slate-950 border-b border-slate-900/80 px-4 py-3 flex items-center justify-between z-30">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+            <Database className="w-5 h-5 text-indigo-400" />
           </div>
           <div>
-            <h1 className="font-semibold text-lg tracking-tight bg-gradient-to-r from-slate-100 via-indigo-100 to-indigo-400 bg-clip-text text-transparent">
+            <h1 className="font-bold text-sm md:text-base tracking-tight text-white leading-none">
               Voice Memory Ledger
             </h1>
-            <p className="text-xs text-slate-500">Cognitive SQLite Storage SaaS Engine</p>
+            <p className="text-[10px] text-slate-500 font-mono mt-0.5">Isolated SQLite Micro-SaaS Engine</p>
           </div>
         </div>
-        <div className="flex items-center gap-4 text-xs font-mono">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-full text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            SQLite Node Connected
+
+        {/* Dynamic active user status bubble */}
+        {userId && !isEditingName && (
+          <div className="flex items-center gap-2">
+            <div className="text-[10px] sm:text-xs font-mono bg-indigo-505/10 bg-slate-900 border border-slate-800 px-3 py-1 rounded-full text-slate-300 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Session ID: <strong className="text-white font-semibold font-sans">{userId}</strong>
+            </div>
+            <button
+              onClick={() => {
+                setTempName(userId);
+                setIsEditingName(true);
+              }}
+              className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors text-xs font-medium font-sans px-2.5 py-1"
+              title="Change Account Name"
+            >
+              Rename
+            </button>
+            <button
+              onClick={clearSessionProfile}
+              className="text-[10px] text-red-400 hover:text-red-300 transition-colors px-1"
+            >
+              Clear
+            </button>
           </div>
-        </div>
+        )}
       </header>
 
-      {/* USER PROFILE MULTI-TENANCY CONTROL */}
-      <section className="relative max-w-5xl mx-auto px-6 pt-6">
-        <div className="bg-slate-900/40 backdrop-blur-md border border-slate-900 rounded-2xl p-4 md:p-6 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 blur-3xl rounded-full pointer-events-none -mr-16 -mt-16" />
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-indigo-500/10 rounded-lg mt-0.5 border border-indigo-500/20">
-                <Terminal className="w-4 h-4 text-indigo-400" />
+      {/* 2. INSTANT MULTI-TENANCY NAME MEMORY PROMPT (Display only when nameless OR triggered rename) */}
+      <AnimatePresence>
+        {isEditingName && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="shrink-0 bg-gradient-to-r from-indigo-950/40 via-slate-900 to-indigo-950/40 border-b border-indigo-500/20 px-6 py-3.5 z-20 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-indigo-500/10 rounded-xl border border-indigo-500/10">
+                <Sliders className="w-4 h-4 text-indigo-400" />
               </div>
-              <div>
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-300">Isolated Multi-Tenant Profile</h2>
-                <p className="text-[10px] text-slate-500 mt-1">Every tester gets a fully isolated, secure memory database sandbox.</p>
-              </div>
-            </div>
-            <div className="flex-1 md:max-w-md w-full">
-              <label className="block text-[11px] font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wide">
-                Enter Your Name or Unique ID
-              </label>
-              <div className="relative">
-                <input 
-                  type="text"
-                  value={userId}
-                  onChange={(e) => handleUserIdChange(e.target.value)}
-                  placeholder="e.g. Pramod, User7, Friend1"
-                  className="w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300 placeholder:text-slate-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-all"
-                />
-                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                  Profile Live
-                </div>
+              <div className="text-center md:text-left">
+                <p className="text-xs font-semibold text-slate-200 tracking-wide uppercase font-sans">
+                  Enter Your Name to Begin Private Session
+                </p>
+                <p className="text-[10px] text-slate-400 leading-normal">
+                  No databases will be shared. All voice actions will query and write exclusively to your standalone user profile sandbox.
+                </p>
               </div>
             </div>
-          </div>
-        </div>
-      </section>
-
-      {/* NEW: API KEY MANAGER INTERFACE (Client Provided Headers) */}
-      <section className="relative max-w-5xl mx-auto px-6 pt-6">
-        <div className="bg-slate-900/40 backdrop-blur-md border border-slate-900 rounded-2xl p-4 md:p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <KeyRound className="w-4 h-4 text-indigo-400" />
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-300">Transient Sandbox API Credentials</h2>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* OpenAI Key Input */}
-            <div className="relative">
-              <label className="block text-[11px] font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wide">
-                Enter OpenAI API Key (Whisper Transcription)
-              </label>
-              <div className="relative">
-                <input 
-                  type={showOpenAiKey ? "text" : "password"} 
-                  value={openAiKey} 
-                  onChange={(e) => handleOpenAiKeyChange(e.target.value)} 
-                  placeholder="sk-proj-..." 
-                  className="w-full bg-slate-950/80 border border-slate-800 rounded-lg pl-3 pr-10 py-1.5 text-xs font-mono text-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-all placeholder:text-slate-700"
-                />
-                <button 
-                  type="button"
-                  onClick={() => setShowOpenAiKey(!showOpenAiKey)} 
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  {showOpenAiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-500 mt-1">If blank, transcribes using Google Gemini natively.</p>
-            </div>
-
-            {/* Gemini Key Input */}
-            <div className="relative">
-              <label className="block text-[11px] font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wide">
-                Enter Google Gemini API Key (Cognitive Brain)
-              </label>
-              <div className="relative">
-                <input 
-                  type={showGeminiKey ? "text" : "password"} 
-                  value={geminiKey} 
-                  onChange={(e) => handleGeminiKeyChange(e.target.value)} 
-                  placeholder="AIzaSy..." 
-                  className="w-full bg-slate-950/80 border border-slate-800 rounded-lg pl-3 pr-10 py-1.5 text-xs font-mono text-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-all placeholder:text-slate-700"
-                />
-                <button 
-                  type="button"
-                  onClick={() => setShowGeminiKey(!showGeminiKey)} 
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  {showGeminiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <p className="text-[10px] text-slate-500 mt-1">Required to routing categorizations & answers.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* MAIN APPLICATION CONTAINER */}
-      <main className="relative max-w-5xl mx-auto px-6 pt-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        
-        {/* LEFT COLUMN: THE CAPTURAL NODE CONTROLLER */}
-        <section className="lg:col-span-5 flex flex-col items-center gap-6">
-          
-          <div className="w-full bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-2xl p-8 flex flex-col items-center text-center shadow-xl">
-            <h2 className="text-xs font-semibold tracking-wide text-indigo-400 uppercase mb-2">Voice Capturer Node</h2>
-            <p className="text-xs text-slate-400 mb-8 max-w-xs">
-              State facts to write them, or ask questions to query your historic logs.
-            </p>
-
-            {/* REACTIVE MICROPHONE BUTTON STYLING */}
-            <div className="relative mb-6 flex flex-col items-center">
-              {/* Pulsing ring animation for active states */}
-              <AnimatePresence>
-                {recordingState === "recording" && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1.3 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
-                    className="absolute inset-0 bg-red-500/20 rounded-full pointer-events-none"
-                  />
-                )}
-                {recordingState === "processing" && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.8 }}
-                    animate={{ opacity: 1, scale: 1.15 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    className="absolute inset-0 bg-indigo-500/10 rounded-full pointer-events-none border border-dashed border-indigo-500/30 animate-spin"
-                    style={{ animationDuration: "12s" }}
-                  />
-                )}
-              </AnimatePresence>
-
-              {/* Standard button */}
-              <button
-                id="mic-node-button"
-                onClick={recordingState === "recording" ? stopRecording : startRecording}
-                disabled={recordingState === "processing"}
-                className={`z-10 w-28 h-28 rounded-full border flex items-center justify-center shadow-2xl transition-all duration-300 ${
-                  recordingState === "recording"
-                    ? "bg-red-500 border-red-400 text-white cursor-pointer hover:bg-red-400"
-                    : recordingState === "processing"
-                    ? "bg-slate-800 border-slate-700 text-slate-400 cursor-not-allowed"
-                    : "bg-slate-800/90 border-slate-700/80 text-slate-300 cursor-pointer hover:border-indigo-500 hover:text-white hover:bg-slate-800"
-                }`}
+            
+            <form onSubmit={handleNameSubmit} className="flex items-center gap-2 w-full md:w-auto">
+              <input 
+                type="text"
+                value={tempName}
+                onChange={(e) => setTempName(e.target.value)}
+                placeholder="e.g. Pramod, Milind, Friend1"
+                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-3 py-1.5 w-full md:w-64 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 font-mono"
+                required
+              />
+              <button 
+                type="submit"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs px-4 py-1.5 rounded-lg transition-colors shadow-lg"
               >
-                {recordingState === "recording" ? (
-                  <Square className="w-8 h-8 fill-current" />
-                ) : recordingState === "processing" ? (
-                  <Loader2 className="w-8 h-8 animate-spin text-indigo-400" />
-                ) : (
-                  <Mic className="w-9 h-9" />
-                )}
+                Confirm
               </button>
-
-              {/* Status Tags */}
-              <div className="mt-5 min-h-[24px]">
-                {recordingState === "recording" && (
-                  <span className="flex items-center gap-1.5 text-xs text-red-400 font-medium font-mono">
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                    RECORDING ({formatTime(recordingDuration)})
-                  </span>
-                )}
-                {recordingState === "processing" && (
-                  <span className="flex items-center gap-2 text-xs text-indigo-400 font-medium font-mono">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    COGNITIVE PROCESSING
-                  </span>
-                )}
-                {recordingState === "idle" && (
-                  <span className="text-xs text-slate-500 font-medium">
-                    Press button to record Voice
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Error Message display */}
-            {errorMessage && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="w-full flex gap-2 p-3.5 bg-red-500/10 border border-red-500/20 text-red-300 text-xs text-left rounded-xl mb-4"
-              >
-                <AlertCircle className="w-4 h-4 shrink-0 stroke-[2.5]" />
-                <span>{errorMessage}</span>
-              </motion.div>
-            )}
-
-            {/* NEW: LIVE "STATUS LOG" TERMINAL BOX */}
-            <div className="w-full mt-2 text-left border-t border-slate-800/75 pt-6">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-mono font-semibold tracking-wider text-indigo-400 uppercase flex items-center gap-1.5">
-                  <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                  Live Status Log Terminal
-                </span>
-                {statusLogs.length > 0 && (
-                  <button 
-                    onClick={clearLogsConsole}
-                    className="text-[10px] text-slate-500 hover:text-slate-300 font-mono transition-colors"
-                  >
-                    Clear Logs
-                  </button>
-                )}
-              </div>
-              
-              <div className="w-full bg-slate-950 border border-slate-900 rounded-xl p-4 font-mono text-[10.5px] text-slate-300 h-48 overflow-y-auto space-y-2 relative shadow-inner">
-                <div className="absolute top-3 right-4 flex items-center gap-1.5">
-                  <span className={`w-1.5 h-1.5 rounded-full ${recordingState === "recording" ? "bg-red-500 animate-ping" : recordingState === "processing" ? "bg-indigo-500 animate-pulse" : "bg-indigo-500/30"}`} />
-                  <span className="text-[9px] text-slate-600 uppercase font-semibold">LIVE_STREAM</span>
-                </div>
-                
-                {statusLogs.length === 0 ? (
-                  <div className="text-slate-700 italic py-1 leading-relaxed">
-                    &gt; Console pipeline idle. Records or speech queries will populate execution logs here.
-                  </div>
-                ) : (
-                  statusLogs.map((log, index) => (
-                    <div key={index} className="text-indigo-200/90 leading-relaxed border-l border-slate-800 pl-2 shrink-0 select-text">
-                      <span className="text-slate-600 font-medium">$&gt;</span> {log}
-                    </div>
-                  ))
-                )}
-                <div ref={logTerminalEndRef} />
-              </div>
-            </div>
-
-            {/* Tips area */}
-            <div className="w-full p-4 bg-slate-950/40 border border-slate-900 rounded-xl text-left text-[11px] text-slate-400 mt-6">
-              <span className="font-semibold text-slate-300 block mb-1.5 flex items-center gap-1">
-                <Info className="w-3.5 h-3.5 text-slate-400" /> Standard Voice Blueprints
-              </span>
-              <ul className="list-disc pl-4 space-y-1 text-slate-400/95 leading-normal">
-                <li><span className="text-indigo-300">Fact:</span> &quot;Remember my office alarm passcode is 4029&quot;</li>
-                <li><span className="text-indigo-300">Question:</span> &quot;What was my office passcode again?&quot;</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        {/* RIGHT COLUMN: COGNITIVE RESPONSE TERMINAL & HISTORY GRID */}
-        <section className="lg:col-span-7 flex flex-col gap-6">
-          
-          {/* COGNITIVE PIPELINE RESPONSE CARD */}
-          <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-2xl p-6 md:p-8 shadow-xl">
-            <h2 className="text-sm font-semibold tracking-wide text-indigo-400 uppercase mb-4 flex items-center gap-2">
-              <Sparkles className="w-4 h-4" /> Cognitive Response Terminal
-            </h2>
-
-            <AnimatePresence mode="wait">
-              {systemResponse ? (
-                <motion.div 
-                  key="response-present"
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -15 }}
-                  className="space-y-6"
+              {userId && (
+                <button 
+                  type="button" 
+                  onClick={() => setIsEditingName(false)}
+                  className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 text-xs px-3 py-1.5 rounded-lg transition-colors"
                 >
-                  {/* Transcription Sub-card */}
-                  <div className="p-4 bg-slate-950/80 border border-slate-900 rounded-xl relative">
-                    <span className="absolute -top-2 left-3 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-full text-[10px] uppercase font-mono text-indigo-400 font-semibold tracking-wider">
-                      Spoken Audio Input
-                    </span>
-                    <p className="text-slate-300 pt-1 leading-relaxed italic text-[14px]">
-                      &quot;{systemResponse.transcription}&quot;
-                    </p>
-                    <div className="mt-2.5 flex items-center justify-between text-[10px] text-slate-500 font-mono">
-                      <span>Transcribed with: {systemResponse.providerUsed}</span>
-                      <span>1 Ch • 16kHz Webm</span>
+                  Cancel
+                </button>
+              )}
+            </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 3. CORE AUDIO CAPTURE BOARD (ROCK-SOLID COORDINATES - NO HEIGHT JUMPING) */}
+      <section className="shrink-0 flex flex-col items-center justify-center bg-slate-950 border-b border-slate-900 py-5 z-10 relative">
+        <div className="w-full max-w-5xl px-6 flex flex-col items-center">
+          
+          {/* Constant stable wrapper for mic action controls */}
+          <div className="relative h-28 w-28 flex items-center justify-center">
+            
+            <AnimatePresence>
+              {recordingState === "recording" && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1.35 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  transition={{ repeat: Infinity, duration: 1.5, ease: "easeOut" }}
+                  className="absolute inset-0 bg-red-500/20 rounded-full pointer-events-none z-0"
+                />
+              )}
+              {recordingState === "processing" && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1.2 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  className="absolute inset-0 bg-indigo-500/10 rounded-full pointer-events-none border border-dashed border-indigo-500/30 animate-spin z-0"
+                  style={{ animationDuration: "14s" }}
+                />
+              )}
+            </AnimatePresence>
+
+            {/* Microphone tap target */}
+            <button
+              id="anchored-voice-node-button"
+              onClick={recordingState === "recording" ? stopRecording : startRecording}
+              disabled={recordingState === "processing" || !userId}
+              className={`z-10 w-24 h-24 rounded-full border flex items-center justify-center shadow-2xl transition-all duration-300 absolute ${
+                !userId
+                  ? "bg-slate-900 border-slate-800 text-slate-600 cursor-not-allowed opacity-50"
+                  : recordingState === "recording"
+                  ? "bg-red-500 border-red-400 text-white cursor-pointer hover:bg-red-400"
+                  : recordingState === "processing"
+                  ? "bg-slate-800 border-slate-700 text-slate-400 cursor-not-allowed"
+                  : "bg-slate-800/95 border-slate-700 text-slate-200 cursor-pointer hover:border-indigo-500 hover:text-white hover:bg-slate-800"
+              }`}
+            >
+              {recordingState === "recording" ? (
+                <Square className="w-7 h-7 fill-current" />
+              ) : recordingState === "processing" ? (
+                <Loader2 className="w-7 h-7 animate-spin text-indigo-400" />
+              ) : (
+                <Mic className="w-8 h-8" />
+              )}
+            </button>
+          </div>
+
+          {/* Secure stable heights for status elements under the mic to prevent shifting of mic coordinates */}
+          <div className="h-6 mt-3 flex items-center justify-center">
+            {recordingState === "recording" && (
+              <span className="flex items-center gap-2 text-xs text-red-400 font-semibold font-mono">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping shrink-0" />
+                RECORDING AUDIO ({formatTime(recordingDuration)})
+              </span>
+            )}
+            {recordingState === "processing" && (
+              <span className="flex items-center gap-2 text-xs text-indigo-400 font-semibold font-mono">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ANALYZING SPEECH WITH WHISPER & GEMINI
+              </span>
+            )}
+            {recordingState === "idle" && (
+              <span className="text-xs text-slate-400 font-sans tracking-wide">
+                {!userId ? (
+                  <strong className="text-rose-400 font-medium">Please enter your profile name above to begin recording</strong>
+                ) : (
+                  "Say facts to log them, or ask questions to query"
+                )}
+              </span>
+            )}
+          </div>
+
+          {/* Error notice panel inside stable absolute space or bounded low height */}
+          <div className="h-10 mt-1.5 flex items-center justify-center w-full max-w-xl">
+            {errorMessage && (
+              <div className="flex gap-2 p-2 bg-red-500/10 border border-red-500/20 text-red-400 text-[10.5px] rounded-lg items-center text-center leading-snug w-full justify-center">
+                <AlertCircle className="w-3.5 h-3.5 stroke-[2.5] text-red-400 shrink-0" />
+                <span className="truncate">{errorMessage}</span>
+                <button onClick={() => setErrorMessage(null)} className="text-slate-500 hover:text-slate-300 font-mono text-[9px] ml-1 uppercase pl-1.5 border-l border-red-500/10">Dismiss</button>
+              </div>
+            )}
+          </div>
+
+        </div>
+      </section>
+
+      {/* 4. RESPONSIVE SEGMENTED TABS CONTROLLERS (Display only on small views below desktop grid) */}
+      <div className="shrink-0 md:hidden bg-slate-950 border-b border-slate-900 p-2.5 flex items-center gap-2 z-10 justify-center">
+        <button 
+          onClick={() => setActiveMobileTab("insights")}
+          className={`flex-1 max-w-[180px] text-center text-xs py-1.5 rounded-lg font-medium transition-all ${activeMobileTab === "insights" ? "bg-slate-800 text-indigo-400 border border-slate-700/60" : "text-slate-400 hover:text-slate-200"}`}
+        >
+          Insights Response
+        </button>
+        <button 
+          onClick={() => setActiveMobileTab("ledger")}
+          className={`flex-1 max-w-[180px] text-center text-xs py-1.5 rounded-lg font-medium transition-all ${activeMobileTab === "ledger" ? "bg-slate-800 text-indigo-400 border border-slate-700/60" : "text-slate-400 hover:text-slate-200"}`}
+        >
+          SQLite Ledger ({memories.length})
+        </button>
+      </div>
+
+      {/* 5. MULTIPLE RESULTS CHASSIS (Lock Layout Scroll Boundaries with dynamic inner overflow lists) */}
+      <main className="flex-1 min-h-0 w-full max-w-5xl mx-auto p-4 md:p-6 grid grid-cols-1 md:grid-cols-12 gap-5 overflow-hidden z-10">
+        
+        {/* PANEL A: COGNITIVE INTELLIGENCE TERMINAL & LIVE CONSOLE LOGS */}
+        <section className={`md:col-span-6 h-full flex flex-col gap-4 min-h-0 overflow-hidden ${activeMobileTab === "insights" ? "flex" : "hidden md:flex"}`}>
+          
+          {/* Cognitive Answer Terminal (Takes flexible space with overflow list scroll) */}
+          <div className="flex-1 min-h-0 bg-slate-900/30 backdrop-blur-md border border-slate-950/80 rounded-xl p-4 md:p-5 flex flex-col shadow-xl">
+            <div className="flex items-center justify-between mb-3 shrink-0">
+              <h2 className="text-xs font-semibold tracking-wider text-indigo-400 uppercase flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5" /> Cognitive Agent Insight
+              </h2>
+              {systemResponse?.providerUsed && (
+                <span className="text-[9px] font-mono text-slate-500 px-2 py-0.5 bg-slate-950 rounded border border-slate-900">
+                  {systemResponse.providerUsed}
+                </span>
+              )}
+            </div>
+
+            {/* Inner responsive box */}
+            <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-4">
+              <AnimatePresence mode="wait">
+                {systemResponse ? (
+                  <motion.div 
+                    key="voice-insights-result"
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="space-y-4 text-xs font-sans leading-relaxed"
+                  >
+                    {/* User speech card */}
+                    <div className="p-3 bg-slate-950/80 border border-slate-900 rounded-lg relative">
+                      <span className="text-[9px] font-mono font-bold text-indigo-400/80 uppercase block mb-1 tracking-wider">Spoken statement</span>
+                      <p className="text-slate-200 italic font-sans leading-normal text-[13px]">
+                        &quot;{systemResponse.transcription}&quot;
+                      </p>
                     </div>
-                  </div>
 
-                  {/* Decision Tag Routing & Outcome */}
-                  <div className="flex flex-col gap-3">
+                    {/* Routing Meta Info Bar */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      {systemResponse.action === "SAVE" ? (
-                        <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-500/10 border border-emerald-500/30 rounded-full text-emerald-400 font-mono text-xs font-semibold">
-                          <Bookmark className="w-3.5 h-3.5" />
-                          INTENT ROUTED: [SAVE]
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-500/10 border border-indigo-500/30 rounded-full text-indigo-400 font-mono text-xs font-semibold">
-                          <Search className="w-3.5 h-3.5" />
-                          INTENT ROUTED: [SEARCH]
-                        </div>
-                      )}
-
+                      <div className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${systemResponse.action === "SAVE" ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" : "bg-indigo-500/10 border border-indigo-500/20 text-indigo-400"}`}>
+                        ACTION: {systemResponse.action}
+                      </div>
                       {systemResponse.category && (
-                        <div className="px-2.5 py-0.5 bg-slate-800 border border-slate-700 rounded-md text-[11px] font-medium text-slate-300">
+                        <div className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-[10.5px] font-medium text-slate-300 rounded">
                           Category: {systemResponse.category}
                         </div>
                       )}
-                      
                       {systemResponse.query && (
-                        <div className="px-2.5 py-0.5 bg-slate-800 border border-slate-700 rounded-md text-[11px] font-medium text-indigo-300 font-mono">
-                          Keyword: &quot;{systemResponse.query}&quot;
+                        <div className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-[10.5px] font-mono text-indigo-300 rounded">
+                          Query: &quot;{systemResponse.query}&quot;
                         </div>
                       )}
                     </div>
 
-                    {/* Final Formulated System Response Textarea */}
-                    <div className="p-5 bg-gradient-to-br from-indigo-950/20 to-slate-950/60 border border-indigo-500/15 rounded-xl text-slate-100">
+                    {/* Formulated insights bubbles */}
+                    <div className="p-4 bg-gradient-to-br from-indigo-950/10 to-slate-950 border border-indigo-500/10 rounded-lg">
                       <div className="flex gap-2.5 items-start">
                         {systemResponse.action === "SAVE" ? (
-                          <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                         ) : (
-                          <Sparkles className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
+                          <Sparkles className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
                         )}
-                        <div>
-                          <p className="text-slate-250 text-sm font-medium leading-relaxed">
+                        <div className="flex-1">
+                          <p className="text-slate-100 text-[13px] font-medium leading-relaxed select-text">
                             {systemResponse.message}
                           </p>
                           {systemResponse.action === "SAVE" && systemResponse.memory && (
-                            <div className="mt-3 text-xs p-2.5 bg-slate-950/80 border border-slate-900 rounded-lg font-mono text-indigo-300">
-                              <span className="text-slate-500 block mb-0.5">Logged Record Payload:</span>
+                            <div className="mt-2.5 text-[10.5px] p-2 bg-slate-950/80 border border-slate-900 rounded font-mono text-indigo-300 select-text">
+                              <span className="text-slate-500 text-[9px] block mb-0.5 uppercase tracking-wide">Payload saved:</span>
                               {systemResponse.memory}
                             </div>
-                          )}
-                          {systemResponse.action === "SEARCH" && typeof systemResponse.matchedCount === "number" && (
-                            <span className="block mt-2.5 text-[10px] text-slate-500 font-mono">
-                              Located {systemResponse.matchedCount} historical database hit(s) for query synthesis.
-                            </span>
                           )}
                         </div>
                       </div>
                     </div>
-                  </div>
-                </motion.div>
-              ) : (
-                <motion.div 
-                  key="response-absent"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  className="py-12 flex flex-col items-center justify-center text-center text-slate-500"
-                >
-                  <div className="w-12 h-12 rounded-full bg-slate-950 flex items-center justify-center border border-slate-900 mb-3">
-                    <HelpCircle className="w-6 h-6 text-slate-600" />
-                  </div>
-                  <p className="text-xs max-w-sm font-normal">
-                    No active voice events processed. Trigger the microphone to begin transcription, AI analysis, and autonomous SQLite execution.
-                  </p>
-                </motion.div>
-              )}
-            </AnimatePresence>
+
+                  </motion.div>
+                ) : (
+                  <motion.div 
+                    key="voice-insights-empty"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="h-full flex flex-col items-center justify-center text-center text-slate-500 py-12"
+                  >
+                    <HelpCircle className="w-8 h-8 text-slate-700 mb-2.5" />
+                    <p className="text-xs max-w-xs font-normal text-slate-400">
+                      No memory event processed in this turn. Trigger the voice recorder, ask a question of your past records, or log a new fact.
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
 
-          {/* SECURE SQLITE LEDGER HISTORY INVENTORY */}
-          <div className="bg-slate-900/60 backdrop-blur-md border border-slate-800/80 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold tracking-wide text-slate-300 uppercase flex items-center gap-2">
-                <Database className="w-4 h-4 text-slate-400" /> SQLite Ledger Database
-              </h3>
-              <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-950 border border-slate-900 rounded-full text-indigo-400">
-                {memories.length} Records Saved
+          {/* Collapsible Transient Session API Key Manager Accordion at very bottom of Column */}
+          <div className="shrink-0 bg-slate-900/10 border border-slate-900/60 rounded-xl p-3 shadow-inner">
+            <button
+              onClick={() => setShowApiKeysSetting(!showApiKeysSetting)}
+              className="w-full flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <span className="flex items-center gap-1.5 font-bold text-[10.5px]">
+                <KeyRound className="w-3.5 h-3.5 text-slate-500" /> API Credentials Configuration
               </span>
-            </div>
+              <span className="text-[9px] bg-slate-950 px-2 py-0.5 rounded border border-slate-900 text-slate-500">
+                {showApiKeysSetting ? "Collaspe" : "Configure Keys"}
+              </span>
+            </button>
 
-            <div className="overflow-hidden rounded-xl border border-slate-800/80 bg-slate-950/50 max-h-[350px] overflow-y-auto">
-              {isFetchingMemories ? (
-                <div className="py-12 flex flex-col items-center justify-center text-slate-500 font-mono text-xs gap-2">
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-600" />
-                  SYNCING RECORD TIMELINE...
+            {showApiKeysSetting && (
+              <div className="mt-3 pt-3 border-t border-slate-900 space-y-3">
+                <div className="relative">
+                  <span className="block text-[10px] font-mono text-slate-500 mb-1">OPENAI API KEY (Whisper)</span>
+                  <div className="relative">
+                    <input 
+                      type={showOpenAiKey ? "text" : "password"} 
+                      value={openAiKey} 
+                      onChange={(e) => handleOpenAiKeyChange(e.target.value)} 
+                      placeholder="sk-proj-..." 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-2 pr-8 py-1 text-[11px] font-mono text-slate-350 focus:outline-none focus:border-indigo-500 transition-all placeholder:text-slate-800"
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => setShowOpenAiKey(!showOpenAiKey)} 
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300 transition-colors p-0.5"
+                    >
+                      {showOpenAiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  </div>
                 </div>
-              ) : memories.length > 0 ? (
-                <table className="w-full text-left border-collapse text-xs">
+
+                <div className="relative">
+                  <span className="block text-[10px] font-mono text-slate-500 mb-1">GOOGLE GEMINI API KEY</span>
+                  <div className="relative">
+                    <input 
+                      type={showGeminiKey ? "text" : "password"} 
+                      value={geminiKey} 
+                      onChange={(e) => handleGeminiKeyChange(e.target.value)} 
+                      placeholder="AIzaSy..." 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-2 pr-8 py-1 text-[11px] font-mono text-slate-350 focus:outline-none focus:border-indigo-500 transition-all placeholder:text-slate-800"
+                    />
+                    <button 
+                      type="button"
+                      onClick={() => setShowGeminiKey(!showGeminiKey)} 
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300 transition-colors p-0.5"
+                    >
+                      {showGeminiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[9px] text-slate-600 leading-normal">
+                  Providing these transient browser keys secures priority processing queue access. Values are preserved inside standard system client-side encrypted localStorage.
+                </p>
+              </div>
+            )}
+          </div>
+
+        </section>
+
+        {/* PANEL B: SQLITE HISTORY INVENTORY (Scrolls independently) */}
+        <section className={`md:col-span-6 h-full flex flex-col min-h-0 bg-slate-900/30 backdrop-blur-md border border-slate-950/80 rounded-xl p-4 md:p-5 shadow-xl overflow-hidden ${activeMobileTab === "ledger" ? "flex" : "hidden md:flex"}`}>
+          
+          <div className="flex items-center justify-between shrink-0 mb-3.5">
+            <h3 className="text-xs font-semibold tracking-wider text-slate-300 uppercase flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5 text-slate-400" /> Sandbox Database Ledger
+            </h3>
+            <span className="font-mono text-[9px] px-2.5 py-0.5 bg-slate-950 border border-slate-800 rounded-full text-indigo-400 font-bold">
+              {memories.length} Records Isolated
+            </span>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto bg-slate-950/40 border border-slate-900 rounded-lg relative">
+            {isFetchingMemories ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 font-mono text-[11px] gap-2.5 bg-slate-950/80">
+                <Loader2 className="w-5 h-5 animate-spin text-slate-600" />
+                LOADING SECURE ACCOUNT REGISTRY...
+              </div>
+            ) : memories.length > 0 ? (
+              <div className="w-full">
+                <table className="w-full text-left border-collapse text-[11.5px]">
                   <thead>
-                    <tr className="bg-slate-900/80 border-b border-slate-800 text-slate-400 font-mono text-[10px] uppercase tracking-wider">
-                      <th className="py-2 px-4 font-semibold">Category</th>
-                      <th className="py-2 px-4 font-semibold">Logged Memory</th>
-                      <th className="py-2 px-4 font-semibold hidden md:table-cell"><span className="flex items-center gap-1"><Clock className="w-3 h-3 text-slate-500" /> Logged Date</span></th>
-                      <th className="py-2 px-4 text-right w-12 font-semibold">Action</th>
+                    <tr className="bg-slate-900/80 border-b border-slate-800 text-slate-500 font-mono text-[9px] uppercase tracking-wider sticky top-0 z-10">
+                      <th className="py-2.5 px-3 font-semibold">Label ID</th>
+                      <th className="py-2.5 px-3 font-semibold">Memory Record</th>
+                      <th className="py-2.5 px-3 text-right w-10 font-semibold">Delete</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-900">
-                    <AnimatePresence>
-                      {memories.map((entry) => (
-                        <motion.tr 
-                          key={entry.id}
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          className="hover:bg-slate-900/40 transition-colors"
-                        >
-                          <td className="py-3 px-4 font-medium align-top whitespace-nowrap">
-                            <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-[10px] rounded text-indigo-300 font-medium">
-                              {entry.category}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-slate-300 leading-normal align-top font-sans select-text">
-                            {entry.memory}
-                          </td>
-                          <td className="py-3 px-4 text-slate-500 font-mono text-[10px] whitespace-nowrap align-top hidden md:table-cell">
-                            {new Date(entry.timestamp).toLocaleString(undefined, {
-                              month: "short",
-                              day: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit"
-                            })}
-                          </td>
-                          <td className="py-3 px-4 text-right align-top">
-                            <button
-                              onClick={() => deleteMemory(entry.id)}
-                              className="text-slate-600 hover:text-red-400 p-1.5 rounded-md transition-colors cursor-pointer"
-                              title="Delete Record"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </motion.tr>
-                      ))}
-                    </AnimatePresence>
+                  <tbody className="divide-y divide-slate-900/60 font-sans">
+                    {memories.map((entry) => (
+                      <tr 
+                        key={entry.id}
+                        className="hover:bg-slate-900/35 transition-colors group"
+                      >
+                        <td className="py-2.5 px-3 font-semibold align-top whitespace-nowrap">
+                          <span className="px-1.5 py-0.5 bg-indigo-950/40 border border-indigo-500/10 text-[9.5px] rounded text-indigo-300 font-mono">
+                            {entry.category}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-300 leading-relaxed align-top select-text">
+                          <p className="font-sans font-medium text-[11.5px] text-slate-250">{entry.memory}</p>
+                          <span className="text-[9px] text-slate-600 block mt-1 font-mono">
+                            {new Date(entry.timestamp).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} • ID #{entry.id}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right align-top">
+                          <button
+                            onClick={() => deleteMemory(entry.id)}
+                            className="text-slate-600 hover:text-red-400 p-1.5 rounded-md transition-colors cursor-pointer"
+                            title="Delete Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
-              ) : (
-                <div className="py-12 flex flex-col items-center justify-center text-center text-slate-500 px-6">
-                  <Database className="w-8 h-8 text-slate-800 mb-2" />
-                  <p className="text-xs max-w-xs font-normal">
-                    Database empty. State some key facts to the mic capturer to persist them securely here.
-                  </p>
-                </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center text-slate-500 px-6 py-12">
+                <Database className="w-8 h-8 text-slate-800 mb-2.5 animate-pulse" />
+                <p className="text-xs font-normal text-slate-400 max-w-xs leading-normal">
+                  Your isolated sandbox database folder [{userId}] is empty.
+                </p>
+                <p className="text-[10px] text-slate-600 max-w-[210px] mt-2 block">
+                  Record new facts into the mic above, and they will log to your name automatically.
+                </p>
+              </div>
+            )}
           </div>
+
+          {/* Mini Live Status Terminals inside scroll box */}
+          <div className="shrink-0 mt-3 pt-3 border-t border-slate-900 flex items-center justify-between text-[10px] font-mono text-slate-600">
+            <span className="flex items-center gap-1">
+              <Terminal className="w-3 h-3 text-emerald-500/50" />
+              DB_ISOLATION_RING: ACTIVE
+            </span>
+            <span>ACTIVE PROFILE: &quot;{userId}&quot;</span>
+          </div>
+
         </section>
 
       </main>
+
     </div>
   );
 }

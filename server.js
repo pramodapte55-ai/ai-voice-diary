@@ -18,24 +18,11 @@ app.use(cors());
 const memoryStore = {};
 let memoriesIdCounter = 1;
 
-// Helper to get or initialize user memories with starter seed data
+// Helper to get or initialize user memories with an isolated array
 function getUserMemories(userId) {
   const normId = (userId || "default").trim().toLowerCase();
   if (!memoryStore[normId]) {
-    memoryStore[normId] = [
-      {
-        id: memoriesIdCounter++,
-        timestamp: new Date().toISOString(),
-        category: "पुस्तके",
-        memory: "माझी पुस्तके कपाटात ठेवली आहेत."
-      },
-      {
-        id: memoriesIdCounter++,
-        timestamp: new Date(Date.now() - 600000).toISOString(),
-        category: "बँक",
-        memory: "मी आज बँकेत गेलो होतो. पैशांचे व्यवहार व्यवस्थित झाले."
-      }
-    ];
+    memoryStore[normId] = [];
   }
   return memoryStore[normId];
 }
