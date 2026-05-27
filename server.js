@@ -14,27 +14,36 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 
 // Global in-memory data store for safe serverless runtime
-let memoryLedger = [];
+// Store is localized by userId: { [userId]: [ ...memories ] }
+const memoryStore = {};
 let memoriesIdCounter = 1;
 
-try {
-  memoryLedger = [
-    {
-      id: memoriesIdCounter++,
-      timestamp: new Date().toISOString(),
-      category: "पुस्तके",
-      memory: "माझी पुस्तके कपाटात ठेवली आहेत."
-    },
-    {
-      id: memoriesIdCounter++,
-      timestamp: new Date(Date.now() - 600000).toISOString(),
-      category: "बँक",
-      memory: "मी आज बँकेत गेलो होतो. पैशांचे व्यवहार व्यवस्थित झाले."
-    }
-  ];
-} catch (initErr) {
-  console.error("Initialization error:", initErr);
-  memoryLedger = [];
+// Helper to get or initialize user memories with starter seed data
+function getUserMemories(userId) {
+  const normId = (userId || "default").trim().toLowerCase();
+  if (!memoryStore[normId]) {
+    memoryStore[normId] = [
+      {
+        id: memoriesIdCounter++,
+        timestamp: new Date().toISOString(),
+        category: "पुस्तके",
+        memory: "माझी पुस्तके कपाटात ठेवली आहेत."
+      },
+      {
+        id: memoriesIdCounter++,
+        timestamp: new Date(Date.now() - 600000).toISOString(),
+        category: "बँक",
+        memory: "मी आज बँकेत गेलो होतो. पैशांचे व्यवहार व्यवस्थित झाले."
+      }
+    ];
+  }
+  return memoryStore[normId];
+}
+
+// Get user ID from incoming request headers
+function getUserIdFromRequest(req) {
+  const rawId = req.headers["x-user-id"];
+  return (rawId || "default").trim();
 }
 
 // Setup multer for in-memory audio storage
@@ -210,7 +219,9 @@ async function transcribeWithGemini(audioBuffer, mimeType, apiKey) {
 // API Endpoint: Get the list of all logged memories
 app.get("/api/memories", (req, res) => {
   try {
-    const rows = [...memoryLedger].sort((a, b) => b.id - a.id);
+    const userId = getUserIdFromRequest(req);
+    const userMemories = getUserMemories(userId);
+    const rows = [...userMemories].sort((a, b) => b.id - a.id);
     res.json({ success: true, memories: rows });
   } catch (error) {
     console.error("Memory retrieval error:", error);
@@ -221,10 +232,16 @@ app.get("/api/memories", (req, res) => {
 // API Endpoint: Delete a memory by ID
 app.delete("/api/memories/:id", (req, res) => {
   try {
+    const userId = getUserIdFromRequest(req);
+    const normId = userId.trim().toLowerCase();
+    const userMemories = getUserMemories(userId);
+
     const targetId = parseInt(req.params.id, 10);
-    const initialLength = memoryLedger.length;
-    memoryLedger = memoryLedger.filter((m) => m.id !== targetId);
-    if (memoryLedger.length < initialLength) {
+    const initialLength = userMemories.length;
+    const filtered = userMemories.filter((m) => m.id !== targetId);
+
+    if (filtered.length < initialLength) {
+      memoryStore[normId] = filtered;
       res.json({ success: true, message: "Memory record successfully removed." });
     } else {
       res.status(404).json({ success: false, error: "Record not found." });
@@ -238,6 +255,7 @@ app.delete("/api/memories/:id", (req, res) => {
 // API Endpoint: Process voice recording
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
   try {
+    const userId = getUserIdFromRequest(req);
     if (!req.file) {
       return res.status(400).json({ success: false, error: "No audio payload uploaded." });
     }
@@ -413,14 +431,16 @@ Output format rules based on the detected intent:
       const category = (planData.category || "General").trim();
       const memory = (planData.memory || transcription).trim();
 
-      console.log(`Saving new memory: category=${category}, text="${memory}"`);
+      console.log(`Saving new memory for user=${userId}: category=${category}, text="${memory}"`);
       const newRecord = {
         id: memoriesIdCounter++,
         timestamp: new Date().toISOString(),
         category,
         memory,
       };
-      memoryLedger.push(newRecord);
+
+      const userMemories = getUserMemories(userId);
+      userMemories.push(newRecord);
 
       const finalMsg = planData.message && planData.message.trim()
         ? planData.message.trim()
@@ -441,9 +461,10 @@ Output format rules based on the detected intent:
     } else {
       // SEARCH action
       const query = (planData.query || transcription).trim();
-      console.log(`Executing semantic search for: "${query}"`);
+      console.log(`Executing semantic search for user=${userId}: "${query}"`);
 
-      const allRecords = [...memoryLedger].sort((a, b) => b.id - a.id);
+      const userMemories = getUserMemories(userId);
+      const allRecords = [...userMemories].sort((a, b) => b.id - a.id);
 
       const searchPrompt = `You are an expert AI search engine for a personal voice memory ledger.
 The user is asking a question: "${transcription}"

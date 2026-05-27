@@ -51,6 +51,9 @@ export default function App() {
   const [isFetchingMemories, setIsFetchingMemories] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
 
+  // User Profile multi-tenancy identification key
+  const [userId, setUserId] = useState(() => localStorage.getItem("voice_ledger_user_id") || "Pramod");
+
   // API Key local persistence states
   const [openAiKey, setOpenAiKey] = useState(() => localStorage.getItem("voice_ledger_openai_key") || "");
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem("voice_ledger_gemini_key") || "");
@@ -79,6 +82,11 @@ export default function App() {
   };
 
   // Safe localStorage state updater for keys
+  const handleUserIdChange = (val: string) => {
+    setUserId(val);
+    localStorage.setItem("voice_ledger_user_id", val);
+  };
+
   const handleOpenAiKeyChange = (val: string) => {
     setOpenAiKey(val);
     localStorage.setItem("voice_ledger_openai_key", val);
@@ -97,7 +105,11 @@ export default function App() {
   const fetchMemories = async () => {
     setIsFetchingMemories(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/memories`);
+      const res = await fetch(`${API_BASE_URL}/api/memories`, {
+        headers: {
+          "x-user-id": (userId || "").trim() || "default"
+        }
+      });
       const resText = await res.text();
       let data: any;
       try {
@@ -121,6 +133,9 @@ export default function App() {
 
   useEffect(() => {
     fetchMemories();
+  }, [userId]);
+
+  useEffect(() => {
     return () => {
       if (durationIntervalRef.current) clearInterval(durationIntervalRef.current);
     };
@@ -227,7 +242,9 @@ export default function App() {
       formData.append("audio", audioBlob, "recording.webm");
 
       // Set dynamic header configurations
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = {
+        "x-user-id": (userId || "").trim() || "default"
+      };
       if (openAiKey.trim()) {
         headers["x-openai-key"] = openAiKey.trim();
       }
@@ -287,7 +304,12 @@ export default function App() {
   // Delete an individual memory row
   const deleteMemory = async (id: number) => {
     try {
-      const resp = await fetch(`${API_BASE_URL}/api/memories/${id}`, { method: "DELETE" });
+      const resp = await fetch(`${API_BASE_URL}/api/memories/${id}`, { 
+        method: "DELETE",
+        headers: {
+          "x-user-id": (userId || "").trim() || "default"
+        }
+      });
       const respText = await resp.text();
       let data: any;
       try {
@@ -337,6 +359,41 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* USER PROFILE MULTI-TENANCY CONTROL */}
+      <section className="relative max-w-5xl mx-auto px-6 pt-6">
+        <div className="bg-slate-900/40 backdrop-blur-md border border-slate-900 rounded-2xl p-4 md:p-6 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 blur-3xl rounded-full pointer-events-none -mr-16 -mt-16" />
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 bg-indigo-500/10 rounded-lg mt-0.5 border border-indigo-500/20">
+                <Terminal className="w-4 h-4 text-indigo-400" />
+              </div>
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-300">Isolated Multi-Tenant Profile</h2>
+                <p className="text-[10px] text-slate-500 mt-1">Every tester gets a fully isolated, secure memory database sandbox.</p>
+              </div>
+            </div>
+            <div className="flex-1 md:max-w-md w-full">
+              <label className="block text-[11px] font-mono font-medium text-slate-400 mb-1.5 uppercase tracking-wide">
+                Enter Your Name or Unique ID
+              </label>
+              <div className="relative">
+                <input 
+                  type="text"
+                  value={userId}
+                  onChange={(e) => handleUserIdChange(e.target.value)}
+                  placeholder="e.g. Pramod, User7, Friend1"
+                  className="w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-300 placeholder:text-slate-700 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/25 transition-all"
+                />
+                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  Profile Live
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* NEW: API KEY MANAGER INTERFACE (Client Provided Headers) */}
       <section className="relative max-w-5xl mx-auto px-6 pt-6">
