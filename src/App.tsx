@@ -40,6 +40,8 @@ interface SystemResponse {
   matchedCount?: number;
 }
 
+const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || "";
+
 export default function App() {
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "processing">("idle");
   const [systemResponse, setSystemResponse] = useState<SystemResponse | null>(null);
@@ -94,7 +96,7 @@ export default function App() {
   const fetchMemories = async () => {
     setIsFetchingMemories(true);
     try {
-      const res = await fetch("/api/memories");
+      const res = await fetch(`${API_BASE_URL}/api/memories`);
       const resText = await res.text();
       let data: any;
       try {
@@ -232,7 +234,7 @@ export default function App() {
         headers["x-gemini-key"] = geminiKey.trim();
       }
 
-      const response = await fetch("/api/process-voice", {
+      const response = await fetch(`${API_BASE_URL}/api/process-voice`, {
         method: "POST",
         headers,
         body: formData,
@@ -284,7 +286,7 @@ export default function App() {
   // Delete an individual memory row
   const deleteMemory = async (id: number) => {
     try {
-      const resp = await fetch(`/api/memories/${id}`, { method: "DELETE" });
+      const resp = await fetch(`${API_BASE_URL}/api/memories/${id}`, { method: "DELETE" });
       const respText = await resp.text();
       let data: any;
       try {

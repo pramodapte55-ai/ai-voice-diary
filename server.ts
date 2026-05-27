@@ -573,12 +573,10 @@ async function startServer() {
     });
   }
 
-  // Start full stack server on port 3000 if not in a serverless function environment
-  if (!process.env.VERCEL) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Voice Memory Ledger Server listening at http://localhost:${PORT}`);
-    });
-  }
+  // Start full stack server on port 3000
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Voice Memory Ledger Server listening at http://localhost:${PORT}`);
+  });
 }
 
 startServer().catch((err) => {
