@@ -40,7 +40,8 @@ interface SystemResponse {
   matchedCount?: number;
 }
 
-const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || "";
+// @ts-ignore
+const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || "";
 
 export default function App() {
   const [recordingState, setRecordingState] = useState<"idle" | "recording" | "processing">("idle");
