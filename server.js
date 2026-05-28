@@ -1,45 +1,50 @@
-const express = require("express");
-const cors = require("cors");
-const multer = require("multer");
-const fs = require("fs");
-const path = require("path");
-const { OpenAI } = require("openai");
-const { Pool } = require("pg");
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { OpenAI } from "openai";
+import pg from "pg";
+
+const { Pool } = pg;
+
+// Recreate __dirname safety compatibility for ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// Apply Middleware safely
 app.use(cors());
 app.use(express.json());
 
-// Set up secure upload directory tracking
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
+try {
+    const uploadDir = path.join(__dirname, "uploads");
+    if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir);
+    }
+} catch (dirErr) {
+    console.log("Upload directory alert handled safely:", dirErr.message);
 }
+
 const upload = multer({ dest: "uploads/" });
 
-// Guard API Initialization against missing environment variables
-if (!process.env.OPENAI_API_KEY) {
-    console.error("CRITICAL ERROR: OPENAI_API_KEY environment variable is missing!");
-}
-if (!process.env.DATABASE_URL) {
-    console.error("CRITICAL ERROR: DATABASE_URL environment variable is missing!");
-}
-
+const apiKey = process.env.OPENAI_API_KEY || "";
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY || "dummy-key-to-prevent-boot-crash",
+    apiKey: apiKey || "temporary-fallback-key-to-bypass-boot-crash",
 });
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+    ssl: { rejectUnauthorized: false }
 });
 
-// Database verification loop
 const initDb = async () => {
-    if (!process.env.DATABASE_URL) return;
+    if (!process.env.DATABASE_URL) {
+        console.log("Database connection postponed: DATABASE_URL variable is missing.");
+        return;
+    }
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS voice_ledger (
@@ -50,61 +55,56 @@ const initDb = async () => {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        console.log("Postgres SQL ledger tables verified successfully.");
+        console.log("Database tables verified successfully.");
     } catch (err) {
-        console.error("Database connection block encountered:", err.message);
+        console.log("Database boot connection notice handled safely:", err.message);
     }
 };
 initDb();
 
-// Absolute Base Route to ensure Render doesn't throw a health-check timeout error
 app.get("/", (req, res) => {
-    res.status(200).send("Voice Memory Ledger Engine is Online and Running Flawlessly.");
+    res.status(200).send("Voice Memory Ledger API Engine is online in ES Module mode.");
 });
 
-// Main processing routing channel
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ error: "Payload empty. No audio data caught." });
+            return res.status(400).json({ error: "No audio payload received." });
         }
 
         const audioPath = req.file.path;
         const userName = req.body.name || "Anonymous";
 
-        // 1. Audio Stream Transcription Capture
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
         });
 
         let rawSpokenText = transcriptionResponse.text || "";
-        console.log(`[Captured Voice Stream]: ${rawSpokenText}`);
+        console.log(`[Captured Voice]: ${rawSpokenText}`);
 
         if (fs.existsSync(audioPath)) {
             fs.unlinkSync(audioPath);
         }
 
         if (!rawSpokenText.trim()) {
-            return res.json({ transcription: "Audio stream silent. retry.", type: "store" });
+            return res.json({ transcription: "Audio empty. Try again.", type: "store" });
         }
 
-        // 2. Clear Intent Detection Override Rule
         const lowerText = rawSpokenText.toLowerCase();
         const questionTriggers = [
             'where', 'what', 'who', 'how', 'which', 'when', '?', 
             'कुठे', 'काय', 'कोण', 'कसे', 'केव्हा', 'कहाँ', 'किधर',
-            'kuthe', 'kothe', 'ahet', 'aahe', 'elley', 'ellide'
+            'kuthe', 'kothe', 'ahet', 'aahe'
         ];
         let isQueryMode = questionTriggers.some(word => lowerText.includes(word));
 
-        // 3. Dual-channel context refinement (Separated prompts to prevent text mutation)
         const grammarCorrection = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: "You are a professional multi-lingual text editor. Your job is to correct punctuation and typing mistakes. IMPORTANT SCRIPT RULE: If the user input is completely in English, keep it in the English alphabet. Do not convert English sentences to Devanagari script. If it is in Marathi/Hindi, use clean Devanagari script text, keeping explicit vocabulary like 'medicines', 'box', 'bottle' in English Roman letters."
+                    content: "Clean spacing and grammar. SCRIPT RULE: If input is entirely in English, keep it in English Roman letters. Do not convert it to Devanagari. If input is in Marathi/Hindi script, write in Devanagari, leaving explicit words like 'medicines', 'box', 'bottle' in English characters."
                 },
                 { role: "user", content: rawSpokenText }
             ]
@@ -113,7 +113,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const translationCorrection = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "Translate the provided text statement accurately into plain, baseline English text. Return ONLY the translated words." },
+                { role: "system", content: "Translate the text statement into standard English. Return ONLY the translated raw string response." },
                 { role: "user", content: rawSpokenText }
             ]
         });
@@ -121,17 +121,14 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const polishedText = grammarCorrection.choices[0].message.content.trim();
         const englishTranslation = translationCorrection.choices[0].message.content.trim();
 
-        console.log(`[Processed Metrics]: Polished="${polishedText}" | Mode: ${isQueryMode ? "QUERY" : "STORE"}`);
-
         if (isQueryMode) {
-            // --- DATA EXTRACTION RETRIEVAL SEQUENCE ---
             const dbResult = await pool.query(
                 "SELECT original_text, english_translation FROM voice_ledger WHERE user_name = $1 ORDER BY created_at DESC LIMIT 40",
                 [userName]
             );
 
             const pastMemories = dbResult.rows.map(row => 
-                `- Logged Fact: "${row.original_text}" (English Core Meaning: "${row.english_translation}")`
+                `- Fact: "${row.original_text}" (Meaning: "${row.english_translation}")`
             ).join("\n");
 
             const memoryRecallPrompt = await openai.chat.completions.create({
@@ -139,25 +136,22 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                 messages: [
                     {
                         role: "system",
-                        content: "You are a precise voice diary assistant. Answer the user's question accurately using their historical records ledger. CRITICAL METRIC: Formulate your answer response in the EXACT language script style used in the current question. If the question is asked in English, answer in English. If asked in Marathi/Hindi script, answer in fluent Devanagari text script, retaining English nouns where it matches conversational patterns naturally."
+                        content: "Answer the user's question using their history ledger. DISPLAY RULE: Match the script context of the question. If asked in English, answer in English. If asked in Marathi, answer in fluent Devanagari text, keeping conversational nouns in English letters."
                     },
                     { 
                         role: "user", 
-                        content: `User: ${userName}\nLedger Matrix:\n${pastMemories || "No entries logged."}\n\nCurrent Question: "${polishedText}"\nEnglish Meaning: "${englishTranslation}"` 
+                        content: `User: ${userName}\nLedger:\n${pastMemories || "None"}\n\nQuestion: "${polishedText}"\nMeaning: "${englishTranslation}"` 
                     }
                 ]
             });
 
-            const finalAnswer = memoryRecallPrompt.choices[0].message.content.trim();
-
             return res.json({
                 transcription: polishedText,
                 type: "query",
-                reply: finalAnswer
+                reply: memoryRecallPrompt.choices[0].message.content.trim()
             });
 
         } else {
-            // --- LEDGER DATABASE PERSISTENCE SEQUENCE ---
             await pool.query(
                 "INSERT INTO voice_ledger (user_name, original_text, english_translation) VALUES ($1, $2, $3)",
                 [userName, polishedText, englishTranslation]
@@ -170,9 +164,13 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         }
 
     } catch (err) {
-        console.error("Internal Request Router Failure Caught:", err.message);
-        res.status(500).json({ error: "Internal processing crash." });
+        console.error("Route processing exception handled safely:", err.message);
+        res.status(500).json({ error: "Internal runtime error." });
     }
+});
+
+process.on("uncaughtException", (err) => {
+    console.error("CRITICAL ALERT: Intercepted an unhandled background exception:", err.message);
 });
 
 app.listen(PORT, () => {
