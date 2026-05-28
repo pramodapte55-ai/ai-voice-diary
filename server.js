@@ -50,7 +50,7 @@ app.get("/", (req, res) => {
     res.status(200).send("Voice Memory Ledger API Engine is awake and active.");
 });
 
-// 4. CORE ENGINE: Process Voice Audio Stream with Mixed-Language Intelligence
+// 4. CORE ENGINE: Process Voice Audio Stream with Hybrid Script Preservation
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
     try {
         if (!req.file) {
@@ -64,7 +64,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
-            prompt: "माझी medicines कुठे आहेत? माझे जेवण टेबलवर आहे. माझी चावी kapaat मध्ये आहे. Where are my keys? Multi-lingual conversational ledger handling mixed Marathi and English speech seamlessly.",
+            prompt: "माझी medicines कुठे आहेत? माझे जेवण table वर आहे. माझी चावी box मध्ये आहे. Where are my things? Multi-lingual conversational ledger handling mixed script environments flawlessly.",
         });
 
         const rawSpokenText = transcriptionResponse.text;
@@ -75,24 +75,23 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             fs.unlinkSync(audioPath);
         }
 
-        // Step B: INTENT SANITIZER & MIXED-LANGUAGE INTERPRETER
-        // This upgraded system instruction explicitly handles mixed language inputs.
+        // Step B: LINGUISTIC SCRIPT SANITIZER
+        // CRITICAL UPDATE: Instructs the AI to leave English words in the English script (Roman alphabet)
         const grammarAndIntentAnalysis = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are an expert multi-lingual editor for an advanced voice diary ledger. 
-                    The user frequently mixes English words into Marathi sentences (e.g., saying "माझी medicines कुठे आहेत?" or "mobile चार्जिंगला लावला आहे").
+                    content: `You are an expert multi-lingual editor for a voice ledger. The user speaks a mix of regional Indian languages (Marathi, Tamil, Kannada, Hindi) and inserts English words naturally.
 
-                    Follow these strict execution steps:
-                    1. Clean up the text. If they use an English word in a Marathi sentence, preserve the English word cleanly in Roman script or proper Devanagari so it reads naturally and professionally (e.g., "माझी medicines कुठे आहेत?"). Fix any messy microphone typos.
-                    2. Determine if the user is trying to STORE information or QUERY/ASK a question.
-                    3. Provide a high-precision English translation of the core meaning. If they ask about "medicines", ensure the English translation uses "medicines" or "medication" so it easily matches past entries.
-                    4. Identify the dominant language style they used for display purposes.
+                    Follow these strict script rules for "correctedText":
+                    1. If the user speaks an English word (like "medicines", "box", "car", "keys", "charger"), you MUST keep that word written in the English alphabet (Roman script). Do NOT translate it to the native language and do NOT write it phonetically in Devanagari or other native scripts.
+                    2. Keep the surrounding regional language words in their proper native script (Devanagari, Tamil script, Kannada script, etc.) with flawless grammar.
+                    3. Example Input: "mazi medicines box madhe ahe" -> Corrected Output: "माझी medicines box मध्ये आहे."
+                    4. Identify if it is a storage event or a query question, and provide an accurate English translation of the overall meaning for backend mapping.
 
                     Return your response strictly as a JSON object with these exact keys:
-                    {"correctedText": "clean formatted sentence here", "isQuery": true/false, "englishTranslation": "clear core English meaning here", "detectedLanguage": "language name"}`
+                    {"correctedText": "clean hybrid script sentence here", "isQuery": true/false, "englishTranslation": "clear core English meaning here", "detectedLanguage": "language name"}`
                 },
                 { role: "user", content: rawSpokenText }
             ],
@@ -102,7 +101,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const analysis = JSON.parse(grammarAndIntentAnalysis.choices[0].message.content);
         const polishedText = analysis.correctedText;
         
-        console.log(`[LLM Cleaned Text]: ${polishedText}`);
+        console.log(`[Script Preserved Text]: ${polishedText}`);
         console.log(`[Intent Analysis]: Query=${analysis.isQuery}, Translation Link=${analysis.englishTranslation}`);
 
         // Step C: Routing Infrastructure
@@ -117,18 +116,18 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                 `- Stored Memory: "${row.original_text}" (English Meaning: "${row.english_translation}")`
             ).join("\n");
 
-            // Direct the LLM to cross-reference conceptual meanings, ignoring any language barriers or mixed words
+            // Instruct the AI to also use mixed scripts in its final answers if appropriate
             const aiRecall = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                     {
                         role: "system",
                         content: `You are a premium memory retrieval assistant. Look through the user's past memories listed below. 
-                        Answer the user's question accurately based on the conceptual meaning of their records.
+                        Answer the user's question accurately.
                         
-                        **SYSTEM RULE**: You must formulate your final response to the user in the EXACT language style they used to ask the question.
-                        - If they ask using a mix of Marathi and English (e.g., "माझी medicines कुठे आहेत?"), reply back in natural conversational Marathi, incorporating English terms where it makes the sentence sound fluid and conversational (e.g., "तुमची medicines कपाटाच्या पहिल्या कप्प्यात ठेवली आहेत.").
-                        - Ensure the Devanagari script is beautiful, perfectly punctuated, and grammatically flawless.`
+                        **SCRIPT PRESIDER RULE**: Formulate your response in the exact language style of the current question.
+                        - If the user uses English words mixed with an Indian language script, you must mirror that exact behavior in the answer. Keep English words written in the English alphabet, and native words written in their native script.
+                        - Example style response: "तुमची medicines त्या box मध्ये ठेवली आहेत."`
                     },
                     { 
                         role: "user", 
@@ -147,9 +146,9 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             const finalAnswer = aiRecall.choices[0].message.content;
 
             return res.json({
-                transcription: polishedText, // Displays the clean blended question on your screen
+                transcription: polishedText, // Displays the clean blended scripts on your screen
                 type: "query",
-                reply: finalAnswer // Displays the retrieved intelligence in matching conversational script
+                reply: finalAnswer // Displays the retrieved intelligence in matching mixed scripts
             });
 
         } else {
@@ -160,7 +159,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             );
 
             return res.json({
-                transcription: polishedText, 
+                transcription: polishedText, // Saves and shows the perfect multi-script sentence
                 type: "store"
             });
         }
