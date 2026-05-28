@@ -1,91 +1,93 @@
-import React, { useState, useEffect } from 'react';
-
-declare global {
-  interface Window {
-    SpeechRecognition: any;
-    webkitSpeechRecognition: any;
-  }
-}
+import React, { useState, useRef } from 'react';
 
 function App() {
   const [name, setName] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [displayText, setDisplayText] = useState('');
-  const [displayType, setDisplayType] = useState(''); // 'store' or 'query'
+  const [displayType, setDisplayType] = useState(''); 
   const [aiResponse, setAiResponse] = useState('');
-  const [recognition, setRecognition] = useState<any>(null);
 
-  useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.lang = 'en-IN'; 
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
-      rec.onresult = async (event: any) => {
-        const spokenText = event.results[0][0].transcript;
-        setDisplayText(spokenText);
-
-        const lowerText = spokenText.toLowerCase();
-        // Check if the user is asking a question or making a statement
-        const isQuery = lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय') || lowerText.includes('कहाँ');
-        setDisplayType(isQuery ? 'query' : 'store');
-
-        try {
-    // --- CHANGE THIS LINK TO YOUR ACTUAL RENDER LINK IF AVAILABLE ---
-          const BACKEND_URL = 'https://ai-voice-diary.onrender.com';
-          const response = await fetch(`${BACKEND_URL}/api/voice`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              name: name || 'Anonymous', 
-              text: spokenText,
-              type: isQuery ? 'query' : 'store'
-            })
-          });
-
-          const data = await response.json();
-
-          if (isQuery) {
-            // Flexible check for different database server response names (reply, answer, response, message)
-            const liveAnswer = data.reply || data.answer || data.response || data.message || data.text;
-            setAiResponse(liveAnswer || "No matching memory found in your ledger.");
-          }
-        } catch (error) {
-          console.error("Database connection missing:", error);
-          // If connection fails, print a clean statement instead of simulation text
-          if (isQuery) {
-            setAiResponse("Connecting to live database... (Make sure your Render backend link is updated in App.tsx)");
-          }
-        }
-      };
-
-      rec.onerror = () => setIsRecording(false);
-      rec.onend = () => setIsRecording(false);
-      setRecognition(rec);
-    }
-  }, [name]); 
-
-  const startRecording = () => {
+  const startRecording = async () => {
     setDisplayText('');
     setAiResponse('');
     setDisplayType('');
-    setIsRecording(true);
-    if (recognition) {
-      try { recognition.start(); } catch (err) { console.log(err); }
+    audioChunksRef.current = [];
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.webm');
+        formData.append('name', name || 'Anonymous');
+
+        try {
+          setAiResponse("Searching backend database...");
+          
+          const BACKEND_URL = 'https://ai-voice-diary.onrender.com';
+          const response = await fetch(`${BACKEND_URL}/api/process-voice`, {
+            method: 'POST',
+            body: formData,
+          });
+
+          const data = await response.json();
+          console.log("Raw Server Response Payload:", data);
+
+          // 1. Extract what was spoken
+          const spokenText = data.transcription || data.text || data.input || "";
+          setDisplayText(spokenText);
+
+          // 2. Automatically check if it's a query or a storage entry
+          const lowerText = spokenText.toLowerCase();
+          const isQuery = lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय') || lowerText.includes('कहाँ');
+
+          // 3. Match ANY possible answer field coming from server.js
+          const serverAnswer = data.reply || data.answer || data.response || data.message || data.aiResponse || data.output;
+
+          if (isQuery) {
+            setDisplayType('query');
+            setAiResponse(serverAnswer || "Memory processed, but no direct text answer was returned by the database.");
+          } else {
+            setDisplayType('store');
+          }
+
+        } catch (error) {
+          console.error("Backend Server communication failed:", error);
+          setAiResponse("Could not reach the backend memory ledger.");
+        }
+
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error(err);
+      alert("Please allow microphone permissions.");
     }
   };
 
   const stopRecording = () => {
-    setIsRecording(false);
-    if (recognition) recognition.stop();
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 bg-white flex flex-col justify-between p-6 overflow-hidden select-none">
-      
-      {/* TOP ROW: Title and Name Box */}
       <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-start pt-4 gap-4">
         <h1 className="text-xl font-semibold text-black tracking-tight">
           Voice Memory Ledger
@@ -103,7 +105,6 @@ function App() {
         </div>
       </div>
 
-      {/* CENTER: Mic Button and Clean Output */}
       <div className="flex-1 flex flex-col items-center justify-center w-full">
         <button 
           onClick={isRecording ? stopRecording : startRecording}
@@ -120,7 +121,6 @@ function App() {
           {isRecording ? 'Recording... Tap to Stop' : 'Press the MIC & speak'}
         </p>
 
-        {/* CLEAN DISPLAYS WITHOUT EXTRA TEXT */}
         {displayText && (
           <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-100 text-center">
             {displayType === 'store' && (
@@ -141,7 +141,6 @@ function App() {
           </div>
         )}
 
-        {/* Examples block */}
         {!isRecording && !displayText && (
           <div className="mt-6 flex flex-col items-center text-center text-xs text-gray-400 space-y-1 bg-gray-50 px-4 py-3 rounded-xl border border-gray-100 min-w-[240px]">
             <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px] mb-1">Example</span>
