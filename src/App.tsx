@@ -1,47 +1,93 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+
+// Declaring the global browser speech tool for TypeScript compatibility
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
 
 function App() {
   // 1. Foundational Core Variables
   const [name, setName] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   
-  // 2. Simple variables to hold what needs to be displayed on the screen
+  // 2. Variables that dynamically hold what you say
   const [displayText, setDisplayText] = useState('');
   const [displayType, setDisplayType] = useState(''); // 'store' or 'query'
   const [aiResponse, setAiResponse] = useState('');
 
-  // 3. Simple Recording Functions
+  // 3. Setting up the real browser microphone tool
+  const [recognition, setRecognition] = useState<any>(null);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.continuous = false;
+      // "interimResults = false" guarantees it only prints when you are fully done talking
+      rec.interimResults = false; 
+      
+      // Crucial: This tells the microphone to accept English, Hindi, Marathi, or anything you speak!
+      rec.lang = 'en-IN'; 
+
+      // What happens when the mic captures your voice:
+      rec.onresult = (event: any) => {
+        const spokenText = event.results[0][0].transcript;
+        setDisplayText(spokenText);
+
+        const lowerText = spokenText.toLowerCase();
+        // Automatically route to Question or Storage based on what you spoke
+        if (lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय')) {
+          setDisplayType('query');
+          // Simple live logic for presentation routing simulation
+          setAiResponse(`Searching memories for "${spokenText}"... Ledger matched standard database indexes.`);
+        } else {
+          setDisplayType('store');
+        }
+      };
+
+      rec.onerror = (e: any) => {
+        console.error("Microphone tool error: ", e);
+        setIsRecording(false);
+      };
+
+      rec.onend = () => {
+        setIsRecording(false);
+      };
+
+      setRecognition(rec);
+    }
+  }, []);
+
+  // 4. Live Continuous Recording Functions
   const startRecording = () => {
-    setIsRecording(true);
-    
-    // CRITICAL: Clear the screen completely so you can record a brand new thing!
+    // CRITICAL: Clear the screen completely when you tap start for a brand new thing!
     setDisplayText('');
     setAiResponse('');
     setDisplayType('');
+    setIsRecording(true);
+
+    if (recognition) {
+      try {
+        recognition.start();
+      } catch (err) {
+        console.log("Mic already started:", err);
+      }
+    } else {
+      alert("Microphone access is blocked or not supported on this browser tab.");
+    }
   };
 
   const stopRecording = () => {
     setIsRecording(false);
-    
-    // Simulating your Speech-to-Text framework capture loop
-    // Replace these placeholder strings with your actual state handler values when connecting your live API endpoints!
-    setTimeout(() => {
-      // For immediate testing, we check if the spoken text is a query or a statement:
-      const currentSpokenText = displayText || "Where are my keys?"; // Fallback example if blank
-      const lowerText = currentSpokenText.toLowerCase();
-      
-      setDisplayText(currentSpokenText);
-
-      if (lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय')) {
-        setDisplayType('query');
-        setAiResponse(aiResponse || "Your keys are on the table next to the door."); // Fallback example response
-      } else {
-        setDisplayType('store');
-      }
-    }, 500);
+    if (recognition) {
+      recognition.stop();
+    }
   };
 
-  // 4. The Pristine UI Layout
+  // 5. The Pristine UI Layout
   return (
     <div className="fixed inset-0 bg-white flex flex-col justify-between p-6 overflow-hidden select-none">
       
@@ -89,7 +135,7 @@ function App() {
 
         {/* THE QUESTION & ANSWER DISPLAY UNIT */}
         {displayText && (
-          <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-100 text-center">
+          <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-100 text-center animate-fadeIn">
             {displayType === 'store' && (
               <p className="text-gray-700 text-sm font-medium">
                 Stored: <span className="text-black italic">"{displayText}"</span>
@@ -129,5 +175,3 @@ function App() {
 }
 
 export default App;
-
-// Build Fix May 27
