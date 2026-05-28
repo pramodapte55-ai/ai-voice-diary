@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 function App() {
-  // 1. Core State Variables
+  // 1. Foundational Core Variables
   const [name, setName] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   
@@ -13,18 +13,32 @@ function App() {
   // 3. Simple Recording Functions
   const startRecording = () => {
     setIsRecording(true);
+    
+    // CRITICAL: Clear the screen completely so you can record a brand new thing!
     setDisplayText('');
     setAiResponse('');
+    setDisplayType('');
   };
 
   const stopRecording = () => {
     setIsRecording(false);
     
-    // TEMPORARY FOR DEMO: This simulates speaking "Where are my keys"
-    // When you click the mic to stop, it will immediately display on screen!
-    setDisplayText("Where are my keys?");
-    setDisplayType("query");
-    setAiResponse("Your keys are on the table next to the door.");
+    // Simulating your Speech-to-Text framework capture loop
+    // Replace these placeholder strings with your actual state handler values when connecting your live API endpoints!
+    setTimeout(() => {
+      // For immediate testing, we check if the spoken text is a query or a statement:
+      const currentSpokenText = displayText || "Where are my keys?"; // Fallback example if blank
+      const lowerText = currentSpokenText.toLowerCase();
+      
+      setDisplayText(currentSpokenText);
+
+      if (lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय')) {
+        setDisplayType('query');
+        setAiResponse(aiResponse || "Your keys are on the table next to the door."); // Fallback example response
+      } else {
+        setDisplayType('store');
+      }
+    }, 500);
   };
 
   // 4. The Pristine UI Layout
