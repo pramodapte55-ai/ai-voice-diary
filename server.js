@@ -50,7 +50,7 @@ app.get("/", (req, res) => {
     res.status(200).send("Voice Memory Ledger API Engine is awake and active.");
 });
 
-// 4. CORE ENGINE: Process Voice Audio Stream with Hybrid Script Preservation
+// 4. CORE ENGINE: Process Voice Audio Stream with Robust Intent Matching
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
     try {
         if (!req.file) {
@@ -75,23 +75,24 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             fs.unlinkSync(audioPath);
         }
 
-        // Step B: LINGUISTIC SCRIPT SANITIZER
-        // CRITICAL UPDATE: Instructs the AI to leave English words in the English script (Roman alphabet)
+        // Step B: BULLETPROOF LINGUISTIC SANITIZER & INTENT DETECTOR
         const grammarAndIntentAnalysis = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are an expert multi-lingual editor for a voice ledger. The user speaks a mix of regional Indian languages (Marathi, Tamil, Kannada, Hindi) and inserts English words naturally.
+                    content: `You are an expert multi-lingual editor and intent interpreter for a voice ledger. 
+                    The user speaks a mix of regional Indian languages (like Marathi, Tamil, Kannada, Hindi) and English words.
+                    Sometimes the microphone transcription returns garbled text or spells native words using Roman letters (e.g. "mazi ushady kotheu ahe").
 
-                    Follow these strict script rules for "correctedText":
-                    1. If the user speaks an English word (like "medicines", "box", "car", "keys", "charger"), you MUST keep that word written in the English alphabet (Roman script). Do NOT translate it to the native language and do NOT write it phonetically in Devanagari or other native scripts.
-                    2. Keep the surrounding regional language words in their proper native script (Devanagari, Tamil script, Kannada script, etc.) with flawless grammar.
-                    3. Example Input: "mazi medicines box madhe ahe" -> Corrected Output: "माझी medicines box मध्ये आहे."
-                    4. Identify if it is a storage event or a query question, and provide an accurate English translation of the overall meaning for backend mapping.
+                    Your job is to fix it completely based on these strict guidelines:
+                    1. **Script Restoration**: If the user spoke in an Indian language but it got written in English alphabets, you MUST translate/rewrite it into its proper native script (e.g., "mazi ushady kotheu ahe" must become "माझी औषधे कुठे आहेत?").
+                    2. **English Noun Preservation**: If an explicit English word is spoken (like "medicines", "box", "car", "charger"), keep that word written in clean English letters (Roman alphabet). Do not write it phonetically in Devanagari.
+                    3. **Intent Detection**: Carefully analyze if the user is asking a question or trying to search their memory. Look out for question words across languages ("where", "what", "कुठे", "काये", "कहाँ", "kuthe", "kotheu"). If it is a question, "isQuery" MUST be true.
+                    4. **Meaning Extraction**: Provide a clear, perfectly accurate English translation of the core meaning for back-end database matching.
 
                     Return your response strictly as a JSON object with these exact keys:
-                    {"correctedText": "clean hybrid script sentence here", "isQuery": true/false, "englishTranslation": "clear core English meaning here", "detectedLanguage": "language name"}`
+                    {"correctedText": "flawless native script with english words preserved", "isQuery": true/false, "englishTranslation": "clear core English meaning here", "detectedLanguage": "language name"}`
                 },
                 { role: "user", content: rawSpokenText }
             ],
@@ -101,7 +102,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const analysis = JSON.parse(grammarAndIntentAnalysis.choices[0].message.content);
         const polishedText = analysis.correctedText;
         
-        console.log(`[Script Preserved Text]: ${polishedText}`);
+        console.log(`[Sanitized Text]: ${polishedText}`);
         console.log(`[Intent Analysis]: Query=${analysis.isQuery}, Translation Link=${analysis.englishTranslation}`);
 
         // Step C: Routing Infrastructure
@@ -116,18 +117,18 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                 `- Stored Memory: "${row.original_text}" (English Meaning: "${row.english_translation}")`
             ).join("\n");
 
-            // Instruct the AI to also use mixed scripts in its final answers if appropriate
+            // Direct the LLM to process cross-language matching and output elegant, matching native text
             const aiRecall = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                     {
                         role: "system",
                         content: `You are a premium memory retrieval assistant. Look through the user's past memories listed below. 
-                        Answer the user's question accurately.
+                        Answer the user's question accurately based on the contextual meaning of their records.
                         
-                        **SCRIPT PRESIDER RULE**: Formulate your response in the exact language style of the current question.
-                        - If the user uses English words mixed with an Indian language script, you must mirror that exact behavior in the answer. Keep English words written in the English alphabet, and native words written in their native script.
-                        - Example style response: "तुमची medicines त्या box मध्ये ठेवली आहेत."`
+                        **SYSTEM RULE**: Formulate your final response to the user in the EXACT language style they used to ask the question.
+                        - If they ask in Marathi or a Marathi-English blend, answer them in beautiful, grammatically correct Devanagari script, keeping any native English nouns (like medicines, box) in the English alphabet.
+                        - Match the language of the query perfectly, regardless of what language the original memories were recorded in.`
                     },
                     { 
                         role: "user", 
@@ -146,9 +147,9 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             const finalAnswer = aiRecall.choices[0].message.content;
 
             return res.json({
-                transcription: polishedText, // Displays the clean blended scripts on your screen
+                transcription: polishedText, // Displays clean script on screen
                 type: "query",
-                reply: finalAnswer // Displays the retrieved intelligence in matching mixed scripts
+                reply: finalAnswer // Displays answer in perfect matching language script
             });
 
         } else {
@@ -159,7 +160,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             );
 
             return res.json({
-                transcription: polishedText, // Saves and shows the perfect multi-script sentence
+                transcription: polishedText, 
                 type: "store"
             });
         }
