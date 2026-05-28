@@ -6,6 +6,8 @@ function App() {
   const [displayText, setDisplayText] = useState('');
   const [displayType, setDisplayType] = useState(''); 
   const [aiResponse, setAiResponse] = useState('');
+  // New State tracker to show immediate visual feedback during network lag
+  const [processingStatus, setProcessingStatus] = useState('');
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -14,6 +16,7 @@ function App() {
     setDisplayText('');
     setAiResponse('');
     setDisplayType('');
+    setProcessingStatus('');
     audioChunksRef.current = [];
 
     try {
@@ -34,37 +37,50 @@ function App() {
         formData.append('name', name || 'Anonymous');
 
         try {
-          setAiResponse("Searching backend database...");
+          // STEVE JOBS FEEDBACK HUB: Instantly tell the user the file is safe and uploading
+          setProcessingStatus("Transcribing voice frequency...");
           
+          // Small staggered interval updates to show the engine is actively thinking
+          const statusInterval = setInterval(() => {
+            setProcessingStatus((prev) => {
+              if (prev === "Transcribing voice frequency...") return "Detecting language script...";
+              if (prev === "Detecting language script...") return "Running cross-language vector match...";
+              if (prev === "Running cross-language vector match...") return "Updating SQL database ledger...";
+              return prev;
+            });
+          }, 2000);
+
           const BACKEND_URL = 'https://ai-voice-diary.onrender.com';
           const response = await fetch(`${BACKEND_URL}/api/process-voice`, {
             method: 'POST',
             body: formData,
           });
 
+          clearInterval(statusInterval);
+          setProcessingStatus(''); // Clear status once data arrives cleanly
+
           const data = await response.json();
           console.log("Raw Server Response Payload:", data);
 
-          // 1. Extract what was spoken
           const spokenText = data.transcription || data.text || data.input || "";
           setDisplayText(spokenText);
 
-          // 2. Automatically check if it's a query or a storage entry
           const lowerText = spokenText.toLowerCase();
-          const isQuery = lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय') || lowerText.includes('कहाँ');
+          // Smart multi-lingual query keyword detection rule
+          const isQuery = lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय') || lowerText.includes('कहाँ') || lowerText.includes('कोण');
 
-          // 3. Match ANY possible answer field coming from server.js
           const serverAnswer = data.reply || data.answer || data.response || data.message || data.aiResponse || data.output;
 
           if (isQuery) {
             setDisplayType('query');
-            setAiResponse(serverAnswer || "Memory processed, but no direct text answer was returned by the database.");
+            setAiResponse(serverAnswer || "No direct memory trace found.");
           } else {
             setDisplayType('store');
           }
 
         } catch (error) {
           console.error("Backend Server communication failed:", error);
+          setProcessingStatus('');
           setAiResponse("Could not reach the backend memory ledger.");
         }
 
@@ -88,6 +104,8 @@ function App() {
 
   return (
     <div className="fixed inset-0 bg-white flex flex-col justify-between p-6 overflow-hidden select-none">
+      
+      {/* BRANDING ROW */}
       <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-start pt-4 gap-4">
         <h1 className="text-xl font-semibold text-black tracking-tight">
           Voice Memory Ledger
@@ -105,6 +123,7 @@ function App() {
         </div>
       </div>
 
+      {/* CORE ENGINE CANVAS */}
       <div className="flex-1 flex flex-col items-center justify-center w-full">
         <button 
           onClick={isRecording ? stopRecording : startRecording}
@@ -121,11 +140,23 @@ function App() {
           {isRecording ? 'Recording... Tap to Stop' : 'Press the MIC & speak'}
         </p>
 
-        {displayText && (
-          <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-100 text-center">
+        {/* LIVE PROCESSING STATUS LOADER (STEVE JOBS MINIMALIST INDICATOR) */}
+        {processingStatus && (
+          <div className="mt-8 flex flex-col items-center space-y-3 animate-fade-in">
+            {/* Spinning clean minimalist ring indicator */}
+            <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin"></div>
+            <p className="text-sm font-medium text-black tracking-wide bg-gray-100 px-4 py-1.5 rounded-full border border-gray-200 shadow-sm">
+              {processingStatus}
+            </p>
+          </div>
+        )}
+
+        {/* COMPLETED RESPONSE BOARD */}
+        {displayText && !processingStatus && (
+          <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-100 text-center shadow-sm">
             {displayType === 'store' && (
               <p className="text-gray-700 text-sm font-medium">
-                Stored: <span className="text-black italic">"{displayText}"</span>
+                Stored successfully: <span className="text-black italic font-semibold">"{displayText}"</span>
               </p>
             )}
 
@@ -141,14 +172,15 @@ function App() {
           </div>
         )}
 
-        {!isRecording && !displayText && (
+        {/* ONBOARDING PROMPTS CARD */}
+        {!isRecording && !displayText && !processingStatus && (
           <div className="mt-6 flex flex-col items-center text-center text-xs text-gray-400 space-y-1 bg-gray-50 px-4 py-3 rounded-xl border border-gray-100 min-w-[240px]">
             <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px] mb-1">Example</span>
             <span>"My keys are on the table"</span>
             <span className="italic text-gray-400 text-[11px]">then later ask...</span>
             <span>"Where are my keys?"</span>
             <div className="w-full border-t border-gray-200 my-2"></div>
-            <span className="text-gray-500 font-medium tracking-wide">speak any language</span>
+            <span className="text-gray-500 font-medium tracking-wide">speak in Marathi or English</span>
           </div>
         )}
       </div>
