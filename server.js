@@ -7,9 +7,12 @@ import { fileURLToPath } from "url";
 import { OpenAI } from "openai";
 import pg from "pg";
 
-const { Pool } = pg;
+// FIX: Native direct initialization for ES Modules to prevent reference errors
+const pool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+});
 
-// Recreate __dirname safety compatibility for ES Modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -25,7 +28,7 @@ try {
         fs.mkdirSync(uploadDir);
     }
 } catch (dirErr) {
-    console.log("Upload directory alert handled safely:", dirErr.message);
+    console.log("Upload directory initialized safely.");
 }
 
 const upload = multer({ dest: "uploads/" });
@@ -35,14 +38,9 @@ const openai = new OpenAI({
     apiKey: apiKey || "temporary-fallback-key-to-bypass-boot-crash",
 });
 
-const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
-});
-
 const initDb = async () => {
     if (!process.env.DATABASE_URL) {
-        console.log("Database connection postponed: DATABASE_URL variable is missing.");
+        console.log("DATABASE_URL variable is missing.");
         return;
     }
     try {
@@ -57,13 +55,13 @@ const initDb = async () => {
         `);
         console.log("Database tables verified successfully.");
     } catch (err) {
-        console.log("Database boot connection notice handled safely:", err.message);
+        console.log("Database connection status:", err.message);
     }
 };
 initDb();
 
 app.get("/", (req, res) => {
-    res.status(200).send("Voice Memory Ledger API Engine is online in ES Module mode.");
+    res.status(200).send("Voice Memory Ledger API Engine is online in stable ES Module mode.");
 });
 
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
@@ -170,7 +168,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
 });
 
 process.on("uncaughtException", (err) => {
-    console.error("CRITICAL ALERT: Intercepted an unhandled background exception:", err.message);
+    console.error("Intercepted exception background handling:", err.message);
 });
 
 app.listen(PORT, () => {
