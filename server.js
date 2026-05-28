@@ -62,64 +62,63 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         });
 
         let rawSpokenText = transcriptionResponse.text;
-        console.log(`[Whisper Raw]: ${rawSpokenText}`);
+        console.log(`[Whisper Raw Capture]: ${rawSpokenText}`);
 
         if (fs.existsSync(audioPath)) {
             fs.unlinkSync(audioPath);
         }
 
-        // Step B: AI Clean-up and Translation
-        const grammarAndIntentAnalysis = await openai.chat.completions.create({
+        // ==========================================
+        // CRITICAL STEP B: ULTIMATE AI INTENT GATEKEEPER
+        // Before parsing grammar or scripts, we force a high-accuracy check for questions.
+        // ==========================================
+        const intentCheck = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are an expert multi-lingual voice ledger editor.
-                    Fix the raw transcription into high-quality grammar. 
+                    content: `You are an absolute intent gatekeeper for a voice memory app. 
+                    Analyze the user's input (which might be garbled, written in Hinglish, Marathingli, or native script).
+                    Determine if the user is asking a question to find/retrieve something, or if they are just stating a fact to store.
                     
-                    CRITICAL SCRIPT RULES:
-                    1. Keep explicit English words (e.g., "medicines", "box", "charger", "keys") strictly in the English alphabet (Roman script). Do NOT phonetically write them in Devanagari, Tamil, or Kannada script.
-                    2. Convert the rest of the sentence into beautiful, correct native script (Devanagari for Marathi/Hindi, Tamil script for Tamil, etc.).
-                    3. Determine if it is a question (isQuery: true) or a statement (isQuery: false).
-                    4. Provide a flawless English translation.
-
-                    Return ONLY JSON with these exact keys:
-                    {"correctedText": "text here", "isQuery": true/false, "englishTranslation": "text here", "detectedLanguage": "language name"}`
+                    CRITICAL RULES:
+                    - If the text contains any questioning context like "where is", "kuthe", "kothe", "ahet", "aahe", "find", "எங்கே", "ಎಲ್ಲಿದೆ", or sounds like a question, you MUST return true.
+                    - Respond ONLY with a clean JSON object containing the boolean key "isQuery".`
                 },
                 { role: "user", content: rawSpokenText }
             ],
             response_format: { type: "json_object" }
         });
 
-        const analysis = JSON.parse(grammarAndIntentAnalysis.choices[0].message.content);
-        
+        const intentResult = JSON.parse(intentCheck.choices[0].message.content);
+        const isQueryFlag = intentResult.isQuery;
+        console.log(`[AI Intent Gatekeeper Decision]: isQuery = ${isQueryFlag}`);
+        // ==========================================
+
+        // Step C: Detailed Grammar Cleaning & Script Restoration
+        const grammarAnalysis = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [
+                {
+                    role: "system",
+                    content: `You are an expert multi-lingual editor. Clean the text up.
+                    
+                    CRITICAL SCRIPT RULES:
+                    1. Keep explicit English nouns (e.g., "medicines", "box", "charger", "keys") strictly in the English alphabet (Roman letters). Do NOT write them in Devanagari or other regional scripts.
+                    2. Convert all surrounding text into pristine, grammatically accurate native script (Devanagari for Marathi/Hindi, Tamil script for Tamil, etc.). Fix all spelling issues.
+                    3. Provide a clear, structural English translation for uniform backend lookup.
+
+                    Return ONLY JSON with these exact keys:
+                    {"correctedText": "text here", "englishTranslation": "text here", "detectedLanguage": "language name"}`
+                },
+                { role: "user", content: rawSpokenText }
+            ],
+            response_format: { type: "json_object" }
+        });
+
+        const analysis = JSON.parse(grammarAnalysis.choices[0].message.content);
         let polishedText = analysis.correctedText;
-        let isQueryFlag = analysis.isQuery;
         let englishTranslation = analysis.englishTranslation;
-
-        // ==========================================
-        // HARDCODED STEVE JOBS FAILSAFE OVERRIDE TRACK
-        // If the AI or Whisper makes a mistake, this hard logic catches it instantly!
-        // ==========================================
-        const lowerRaw = rawSpokenText.toLowerCase();
-        const lowerPolished = polishedText.toLowerCase();
-        
-        // Comprehensive list of question triggers across English, Marathi, Hindi, Tamil, Kannada
-        const questionTriggers = [
-            'कुठे', 'आहेत', 'आहे', 'काय', 'kuthe', 'kotheu', 'ahet', 'aahe', 
-            'where', 'what', 'where is', 'எங்கே', 'எங்க', 'எது', 'எல்லಿದೆ', 'ಯಲ್ಲಿದೆ',
-            'ಕಹಾನ್', 'कहाँ', 'किधर', 'किकडे'
-        ];
-
-        const containsQuestionWord = questionTriggers.some(word => 
-            lowerRaw.includes(word) || lowerPolished.includes(word)
-        );
-
-        if (containsQuestionWord) {
-            console.log("[FAILSAFE TRIGGERED]: Forced intent routing to QUERY/RECALL due to keyword match.");
-            isQueryFlag = true;
-        }
-        // ==========================================
 
         if (isQueryFlag) {
             // --- CROSS-LANGUAGE RETRIEVAL ENGINE ---
@@ -137,7 +136,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                 messages: [
                     {
                         role: "system",
-                        content: `You are a memory retrieval assistant. Look through the user's past memories. Answer their question accurately.
+                        content: `You are a premium memory retrieval assistant. Look through the user's past memories and answer their question accurately.
                         
                         **STRICT SCRIPT RULE**: Formulate the response in the exact same language style as the question.
                         - If the question contains English words mixed with an Indian language (e.g., "माझी medicines कुठे आहेत?"), reply using that exact same natural blend (e.g., "तुमची medicines त्या box मध्ये आहेत."). 
