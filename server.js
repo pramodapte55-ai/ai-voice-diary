@@ -60,10 +60,12 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const audioPath = req.file.path;
         const userName = req.body.name || "Anonymous";
 
-        // Step A: Audio Transcription with Automatic Native Language Detection
+        // Step A: Audio Transcription with Phonetic Stabilizer Prompt Hint
+        // The prompt acts as a structural anchor to prevent Devanagari script hallucinations.
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
+            prompt: "माझे जेवण टेबलवर आहे. माझी चावी कपाटात आहे. Where are my things? This is a clear multi-lingual voice ledger capturing high-fidelity Marathi phrases and standard English entries seamlessly.",
         });
 
         const spokenText = transcriptionResponse.text;
@@ -83,7 +85,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                     content: `You are the brain of a multi-lingual voice memory ledger. Analyze the incoming text.
                     1. Determine if the user is trying to STORE information or QUERY/ASK a question.
                     2. Provide an accurate English translation of the core meaning for uniform cross-language matching.
-                    3. Identify the exact language the user is speaking right now (e.g., "Marathi", "English", "Hindi").
+                    3. Identify the exact language the user is speaking right now (e.g., "Marathi", "English").
                     Return your response strictly as a JSON object with these exact keys: 
                     {"isQuery": true/false, "englishTranslation": "text here", "detectedLanguage": "language name"}`
                 },
@@ -118,7 +120,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                         Answer the user's question accurately based on their records.
                         
                         **STEVE JOBS SYSTEM RULE**: You must formulate your final response to the user in the EXACT language they used to ask the question.
-                        - If the current question is asked in Marathi, your response MUST be written in beautiful, native Marathi script.
+                        - If the current question is asked in Marathi, your response MUST be written in beautiful, native, grammatically flawless Devanagari script.
                         - If the current question is asked in English, your response MUST be in English.
                         Match the incoming query language perfectly, regardless of what language the original memories were recorded in.`
                     },
