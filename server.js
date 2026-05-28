@@ -9,21 +9,37 @@ const { Pool } = require("pg");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// Apply Middleware safely
 app.use(cors());
 app.use(express.json());
 
+// Set up secure upload directory tracking
+const uploadDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir);
+}
 const upload = multer({ dest: "uploads/" });
 
+// Guard API Initialization against missing environment variables
+if (!process.env.OPENAI_API_KEY) {
+    console.error("CRITICAL ERROR: OPENAI_API_KEY environment variable is missing!");
+}
+if (!process.env.DATABASE_URL) {
+    console.error("CRITICAL ERROR: DATABASE_URL environment variable is missing!");
+}
+
 const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
+    apiKey: process.env.OPENAI_API_KEY || "dummy-key-to-prevent-boot-crash",
 });
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
+// Database verification loop
 const initDb = async () => {
+    if (!process.env.DATABASE_URL) return;
     try {
         await pool.query(`
             CREATE TABLE IF NOT EXISTS voice_ledger (
@@ -34,116 +50,105 @@ const initDb = async () => {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        console.log("Database initialized successfully.");
+        console.log("Postgres SQL ledger tables verified successfully.");
     } catch (err) {
-        console.error("Database connection failure:", err);
+        console.error("Database connection block encountered:", err.message);
     }
 };
 initDb();
 
+// Absolute Base Route to ensure Render doesn't throw a health-check timeout error
 app.get("/", (req, res) => {
-    res.status(200).send("API Engine Active and Listening.");
+    res.status(200).send("Voice Memory Ledger Engine is Online and Running Flawlessly.");
 });
 
+// Main processing routing channel
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ error: "No audio file payload received." });
+            return res.status(400).json({ error: "Payload empty. No audio data caught." });
         }
 
         const audioPath = req.file.path;
         const userName = req.body.name || "Anonymous";
 
-        // Step A: Capture transcription cleanly
+        // 1. Audio Stream Transcription Capture
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
         });
 
         let rawSpokenText = transcriptionResponse.text || "";
-        console.log(`[Raw Audio Captured]: ${rawSpokenText}`);
+        console.log(`[Captured Voice Stream]: ${rawSpokenText}`);
 
         if (fs.existsSync(audioPath)) {
             fs.unlinkSync(audioPath);
         }
 
         if (!rawSpokenText.trim()) {
-            return res.json({ transcription: "Audio unclear, please repeat.", type: "store" });
+            return res.json({ transcription: "Audio stream silent. retry.", type: "store" });
         }
 
-        // Step B: Robust String Fallback Intent Detection
-        // If the spoken audio matches any core question markers, force query lookup immediately
+        // 2. Clear Intent Detection Override Rule
         const lowerText = rawSpokenText.toLowerCase();
-        const questionWords = [
+        const questionTriggers = [
             'where', 'what', 'who', 'how', 'which', 'when', '?', 
             'कुठे', 'काय', 'कोण', 'कसे', 'केव्हा', 'कहाँ', 'किधर',
             'kuthe', 'kothe', 'ahet', 'aahe', 'elley', 'ellide'
         ];
-        
-        let isQuery = questionWords.some(word => lowerText.includes(word));
+        let isQueryMode = questionTriggers.some(word => lowerText.includes(word));
 
-        // Step C: Streamlined AI Processing (No Complex Variable Script Rules)
-        const textAnalysis = await openai.chat.completions.create({
+        // 3. Dual-channel context refinement (Separated prompts to prevent text mutation)
+        const grammarCorrection = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are a linguistic sanitizer for a private voice diary ledger.
-                    Your objective is to review the raw phrase provided and return a clean, grammatically polished version.
-                    
-                    STRICT SCRIPT DIRECTIVES:
-                    1. If the sentence is spoken in English, preserve it ENTIRELY in the English alphabet (Roman script). Do not translate or change it to Devanagari characters.
-                    2. If spoken in Marathi or mixed Hindi/Marathi, output it in clean, grammatically perfect Devanagari script, leaving explicit English nouns (like medicines, box, charger, bottle) in the English alphabet.
-                    3. Provide a clear English translation translation string for back-end uniformity.`
+                    content: "You are a professional multi-lingual text editor. Your job is to correct punctuation and typing mistakes. IMPORTANT SCRIPT RULE: If the user input is completely in English, keep it in the English alphabet. Do not convert English sentences to Devanagari script. If it is in Marathi/Hindi, use clean Devanagari script text, keeping explicit vocabulary like 'medicines', 'box', 'bottle' in English Roman letters."
                 },
                 { role: "user", content: rawSpokenText }
             ]
         });
 
-        const cleanedTranslationPayload = await openai.chat.completions.create({
+        const translationCorrection = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "Translate the user's input phrase accurately into plain English text summary. Return ONLY the raw translated text string." },
+                { role: "system", content: "Translate the provided text statement accurately into plain, baseline English text. Return ONLY the translated words." },
                 { role: "user", content: rawSpokenText }
             ]
         });
 
-        const polishedText = textAnalysis.choices[0].message.content.trim();
-        const englishTranslation = cleanedTranslationPayload.choices[0].message.content.trim();
+        const polishedText = grammarCorrection.choices[0].message.content.trim();
+        const englishTranslation = translationCorrection.choices[0].message.content.trim();
 
-        console.log(`[Routed Script]: Polished="${polishedText}" | QueryMode=${isQuery}`);
+        console.log(`[Processed Metrics]: Polished="${polishedText}" | Mode: ${isQueryMode ? "QUERY" : "STORE"}`);
 
-        if (isQuery) {
-            // --- DATA RECALL HANDLER ---
+        if (isQueryMode) {
+            // --- DATA EXTRACTION RETRIEVAL SEQUENCE ---
             const dbResult = await pool.query(
                 "SELECT original_text, english_translation FROM voice_ledger WHERE user_name = $1 ORDER BY created_at DESC LIMIT 40",
                 [userName]
             );
 
             const pastMemories = dbResult.rows.map(row => 
-                `- Stored Fact: "${row.original_text}" (English Concept: "${row.english_translation}")`
+                `- Logged Fact: "${row.original_text}" (English Core Meaning: "${row.english_translation}")`
             ).join("\n");
 
-            const aiRecall = await openai.chat.completions.create({
+            const memoryRecallPrompt = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                     {
                         role: "system",
-                        content: `You are a memory retrieval ledger assistant. Search the user's logged facts to answer their question.
-                        
-                        CRITICAL DISPLAY REQUIREMENT:
-                        - Formulate your answer in the EXACT language script style used in the question.
-                        - If the question is in pure English, answer in plain English.
-                        - If the question contains Marathi or a mixed code-switch style, answer in proper Devanagari text, maintaining conversational English words in the Roman alphabet.`
+                        content: "You are a precise voice diary assistant. Answer the user's question accurately using their historical records ledger. CRITICAL METRIC: Formulate your answer response in the EXACT language script style used in the current question. If the question is asked in English, answer in English. If asked in Marathi/Hindi script, answer in fluent Devanagari text script, retaining English nouns where it matches conversational patterns naturally."
                     },
                     { 
                         role: "user", 
-                        content: `User Profile: ${userName}\nHistorical Records Ledger:\n${pastMemories || "No entries logged."}\n\nCurrent Question: "${polishedText}"\nEnglish Meaning: "${englishTranslation}"` 
+                        content: `User: ${userName}\nLedger Matrix:\n${pastMemories || "No entries logged."}\n\nCurrent Question: "${polishedText}"\nEnglish Meaning: "${englishTranslation}"` 
                     }
                 ]
             });
 
-            const finalAnswer = aiRecall.choices[0].message.content.trim();
+            const finalAnswer = memoryRecallPrompt.choices[0].message.content.trim();
 
             return res.json({
                 transcription: polishedText,
@@ -152,7 +157,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             });
 
         } else {
-            // --- DATA STORAGE HANDLER ---
+            // --- LEDGER DATABASE PERSISTENCE SEQUENCE ---
             await pool.query(
                 "INSERT INTO voice_ledger (user_name, original_text, english_translation) VALUES ($1, $2, $3)",
                 [userName, polishedText, englishTranslation]
@@ -164,12 +169,12 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             });
         }
 
-    } catch (error) {
-        console.error("Pipeline Exception Caught:", error);
-        res.status(500).json({ error: "Internal architecture processing timeout." });
+    } catch (err) {
+        console.error("Internal Request Router Failure Caught:", err.message);
+        res.status(500).json({ error: "Internal processing crash." });
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Execution active on port ${PORT}`);
+    console.log(`Server actively bound and executing live on port ${PORT}`);
 });
