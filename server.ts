@@ -1,586 +1,167 @@
-import express from "express";
-import path from "path";
-import cors from "cors";
-import multer from "multer";
-import dotenv from "dotenv";
-import { createServer as createViteServer } from "vite";
+import React, { useState, useRef } from 'react';
 
-// Load environment variables
-dotenv.config();
+function App() {
+  // 1. Core State Hooks
+  const [name, setName] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [displayText, setDisplayText] = useState('');
+  const [displayType, setDisplayType] = useState(''); // 'store' or 'query'
+  const [aiResponse, setAiResponse] = useState('');
 
-const app = express();
-const PORT = 3000;
+  // 2. References to store the browser's raw media recorder engine
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
-// Enable CORS middleware for browser sandboxes
-app.use(cors());
+  // 3. Audio Recording Mechanics
+  const startRecording = async () => {
+    setDisplayText('');
+    setAiResponse('');
+    setDisplayType('');
+    audioChunksRef.current = [];
 
-// Setup Vercel-safe in-memory memory storage interface
-interface Memory {
-  id: number;
-  timestamp: string;
-  category: string;
-  memory: string;
-}
-
-// Define a clean, global in-memory array at the very top of the file, outside any handler functions.
-let memoryLedger: Memory[] = [];
-let memoriesIdCounter = 1;
-
-try {
-  // Wrap the entire initialization block in a try/catch, completely avoiding any fs or startup disk checks
-  memoryLedger = [
-    {
-      id: memoriesIdCounter++,
-      timestamp: new Date().toISOString(),
-      category: "पुस्तके",
-      memory: "माझी पुस्तके कपाटात ठेवली आहेत."
-    },
-    {
-      id: memoriesIdCounter++,
-      timestamp: new Date(Date.now() - 600000).toISOString(),
-      category: "बँक",
-      memory: "मी आज बँकेत गेलो होतो. पैशांचे व्यवहार व्यवस्थित झाले."
-    }
-  ];
-} catch (initErr) {
-  console.error("Graceful initialization handling:", initErr);
-  memoryLedger = [];
-}
-
-// Setup multer for in-memory audio storage
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 15 * 1024 * 1024, // 15MB max file size
-  },
-});
-
-app.use(express.json());
-
-// Direct native REST API helper for Google Gemini 2.5 Flash to replace bulky type/library constraints
-async function callGeminiREST(
-  prompt: string,
-  systemInstruction?: string,
-  apiKey?: string
-): Promise<string> {
-  const key = apiKey || process.env.GEMINI_API_KEY;
-  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") {
-    throw new Error("Google Gemini API token not configured. Please supply a valid key.");
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key.trim()}`;
-  
-  const body: any = {
-    contents: [
-      {
-        parts: [
-          {
-            text: prompt
-          }
-        ]
-      }
-    ],
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 0.2
-    }
-  };
-
-  if (systemInstruction) {
-    body.systemInstruction = {
-      parts: [
-        {
-          text: systemInstruction
-        }
-      ]
-    };
-  }
-
-  console.log("Calling Google Gemini 2.5 Flash REST API directly with native fetch...");
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini REST API responded with HTTP status ${response.status}: ${errorText}`);
-  }
-
-  const data: any = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error("Gemini REST API returned an empty or invalid response candidate.");
-  }
-
-  return text.trim();
-}
-
-async function callOpenaiBrain(transcription: string, systemPrompt: string, apiKey: string): Promise<string> {
-  const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey.trim()}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: `Analyze this user statement or query: "${transcription}"` }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.2
-    }),
-  });
-
-  if (!chatResponse.ok) {
-    const errorText = await chatResponse.text();
-    throw new Error(`OpenAI Chat Completion failed: ${chatResponse.status} ${errorText}`);
-  }
-
-  const chatData: any = await chatResponse.json();
-  return chatData.choices?.[0]?.message?.content?.trim() || "{}";
-}
-
-async function callOpenaiSearch(searchPrompt: string, apiKey: string): Promise<string> {
-  const chatResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey.trim()}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      messages: [
-        { role: "user", content: searchPrompt }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.2
-    }),
-  });
-
-  if (!chatResponse.ok) {
-    const errorText = await chatResponse.text();
-    throw new Error(`OpenAI Chat (Semantic Search Matching) failed: ${chatResponse.status} ${errorText}`);
-  }
-
-  const chatData: any = await chatResponse.json();
-  return chatData.choices?.[0]?.message?.content?.trim() || "{}";
-}
-
-// API Endpoint: Get the list of all logged memories
-app.get("/api/memories", (req, res) => {
-  try {
-    const rows = [...memoryLedger].sort((a, b) => b.id - a.id);
-    res.json({ success: true, memories: rows });
-  } catch (error: any) {
-    console.error("Memory retrieval error:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// API Endpoint: Delete a memory by ID
-app.delete("/api/memories/:id", (req, res) => {
-  try {
-    const targetId = parseInt(req.params.id, 10);
-    const initialLength = memoryLedger.length;
-    memoryLedger = memoryLedger.filter((m) => m.id !== targetId);
-    if (memoryLedger.length < initialLength) {
-      res.json({ success: true, message: "Memory record successfully removed." });
-    } else {
-      res.status(404).json({ success: false, error: "Record not found." });
-    }
-  } catch (error: any) {
-    console.error("Memory deletion error:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// API Endpoint: Process voice recording
-app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: "No audio payload uploaded." });
-    }
-
-    const headerOpenaiKey = req.headers["x-openai-key"] as string | undefined;
-    const useOpenaiKey = (headerOpenaiKey && headerOpenaiKey.trim()) || process.env.OPENAI_API_KEY;
-
-    const headerGeminiKey = req.headers["x-gemini-key"] as string | undefined;
-    const useGeminiKey = (headerGeminiKey && headerGeminiKey.trim()) || process.env.GEMINI_API_KEY;
-
-    const hasOpenai = !!(useOpenaiKey && useOpenaiKey !== "MY_OPENAI_API_KEY" && useOpenaiKey.trim() !== "");
-    const hasGemini = !!(useGeminiKey && useGeminiKey !== "MY_GEMINI_API_KEY" && useGeminiKey.trim() !== "");
-
-    if (!hasOpenai && !hasGemini) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "Sufficient API keys are missing. Please configure a valid OpenAI key or Google Gemini key in the credentials interface or .env file." 
-      });
-    }
-
-    const audioBuffer = req.file.buffer;
-    const mimeType = req.file.mimetype || "audio/webm";
-    const originalName = req.file.originalname || "recording.webm";
-
-    console.log(`Received audio upload: size=${audioBuffer.length} bytes, mimetype=${mimeType}`);
-
-    // ==========================================
-    // STEP A (The Ear): Transcription
-    // ==========================================
-    let transcription = "";
-    let providerUsed = "OpenAI Whisper";
-
-    if (hasOpenai) {
-      try {
-        console.log("Transcribing using OpenAI Whisper API (Step 1: Auto-detection with Verbose JSON)...");
-        const formData1 = new FormData();
-        const audioBlob1 = new Blob([audioBuffer], { type: mimeType });
-        formData1.append("file", audioBlob1, originalName);
-        formData1.append("model", "whisper-1");
-        formData1.append("response_format", "verbose_json");
-
-        const whisperResponse1 = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${useOpenaiKey!.trim()}`,
-          },
-          body: formData1,
-        });
-
-        if (!whisperResponse1.ok) {
-          const errMsg = await whisperResponse1.text();
-          throw new Error(`Whisper API Step 1 responded with HTTP ${whisperResponse1.status}: ${errMsg}`);
-        }
-
-        const whisperData1: any = await whisperResponse1.json();
-        const detectedLanguage = (whisperData1.language || "").toLowerCase();
-        console.log(`OpenAI Custom Auto-Detect Pass: Language confidence resolved to: "${detectedLanguage}"`);
-
-        // If Marathi is detected, initiate Step 2: Precision pass
-        if (detectedLanguage === "marathi" || detectedLanguage === "mr") {
-          console.log("Marathi validated and detected. Running Step 2: Special Marathi Precision Pass with exact language target...");
-          const formData2 = new FormData();
-          const audioBlob2 = new Blob([audioBuffer], { type: mimeType });
-          formData2.append("file", audioBlob2, originalName);
-          formData2.append("model", "whisper-1");
-          formData2.append("language", "mr");
-          formData2.append("prompt", "माझी पुस्तके कपाटात ठेवली आहेत. मी आज बँकेत गेलो होतो. पैशांचे व्यवहार व्यवस्थित झाले.");
-          formData2.append("temperature", "0.2");
-
-          const whisperResponse2 = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${useOpenaiKey!.trim()}`,
-            },
-            body: formData2,
-          });
-
-          if (!whisperResponse2.ok) {
-            const errMsg = await whisperResponse2.text();
-            throw new Error(`Whisper API Step 2 Precision Pass responded with HTTP ${whisperResponse2.status}: ${errMsg}`);
-          }
-
-          const whisperData2: any = await whisperResponse2.json();
-          transcription = whisperData2.text || "";
-          providerUsed = "OpenAI Whisper (Auto-Detected Marathi Precision Pass)";
-        } else {
-          // Keep the initial transcription for match-other languages
-          transcription = whisperData1.text || "";
-          const friendlyLang = detectedLanguage ? detectedLanguage.charAt(0).toUpperCase() + detectedLanguage.slice(1) : "Auto-Detected";
-          providerUsed = `OpenAI Whisper (${friendlyLang})`;
-        }
-      } catch (whisperError: any) {
-        console.warn("Whisper transcribe failed, trying Gemini native transcription fallback...", whisperError.message);
-        if (hasGemini) {
-          transcription = await transcribeWithGemini(audioBuffer, mimeType, useGeminiKey);
-          providerUsed = "Google Gemini REST Fallback";
-        } else {
-          return res.status(500).json({
-            success: false,
-            error: `Whisper transcription failed: ${whisperError.message || whisperError}`
-          });
-        }
-      }
-    } else {
-      // Direct Gemini transcription because OpenAI key is not provided
-      try {
-        console.log("Transcribing using native Gemini REST transcription...");
-        transcription = await transcribeWithGemini(audioBuffer, mimeType, useGeminiKey);
-        providerUsed = "Google Gemini REST";
-      } catch (geminiError: any) {
-        return res.status(500).json({
-          success: false,
-          error: `Gemini transcription failed: ${geminiError.message || geminiError}`
-        });
-      }
-    }
-
-    transcription = transcription.trim();
-    if (!transcription) {
-      return res.status(422).json({
-        success: false,
-        error: "Transcription is empty. Check your mic, speak clearly, and ensure your API keys have credit.",
-      });
-    }
-
-    console.log(`Transcribed text via [${providerUsed}]: "${transcription}"`);
-
-    // ==========================================
-    // STEP B (The Brain): Cognitive Routing
-    // ==========================================
-    const systemPrompt = `You are an AI-powered voice memory ledger assistant. First, identify the language and script of the incoming transcription (e.g., English, Hindi, Marathi, Spanish, Urdu, etc.).
-You must analyze the user's speech and output strictly a valid JSON object.
-Crucially, ensure that the "category", "memory", and "query" values are extracted and saved in the EXACT same language and script that the user spoke. Never translate them to English.
-
-Output format rules based on the detected intent:
-- If they are stating a new fact to remember, output strictly inside JSON: {
-    "action": "SAVE", 
-    "category": "extracted_one_word_category_in_user_spoken_language_and_script", 
-    "memory": "cleaned_fact_string_in_user_spoken_language_and_script", 
-    "message": "polite_short_confirmation_message_indicating_success_written_in_user_spoken_language_and_script"
-  }
-  Example: If Hindi, "category" could be "पासवर्ड", and "message" could be "आपका पासवर्ड सुरक्षित रूप से सहेज लिया गया है।".
-- If they are asking a question about the past or searching, output strictly inside JSON: {
-    "action": "SEARCH", 
-    "query": "cleaned_search_keyword_or_phrase_in_user_spoken_language_and_script"
-  }`;
-
-    let brainJsonText = "";
-    if (hasGemini) {
-      try {
-        console.log("Analyzing text with Gemini brain controller (REST - gemini-2.5-flash)...");
-        brainJsonText = await callGeminiREST(
-          `Analyze this user statement or query: "${transcription}"`,
-          systemPrompt,
-          useGeminiKey
-        );
-      } catch (geminiBrainErr: any) {
-        console.warn("Gemini REST brain controller failed, falling back to OpenAI GPT-4o...", geminiBrainErr);
-        if (hasOpenai) {
-          brainJsonText = await callOpenaiBrain(transcription, systemPrompt, useOpenaiKey!);
-        } else {
-          throw geminiBrainErr;
-        }
-      }
-    } else {
-      console.log("Analyzing text with OpenAI brain controller (gpt-4o)...");
-      brainJsonText = await callOpenaiBrain(transcription, systemPrompt, useOpenaiKey!);
-    }
-    
-    let planData: { action: string; category?: string; memory?: string; query?: string; message?: string };
     try {
-      planData = JSON.parse(brainJsonText);
-    } catch (parseErr) {
-      console.error("Failed to parse OpenAI decision JSON, fallback to basic SAVE", parseErr);
-      planData = { action: "SAVE", category: "General", memory: transcription, message: "Saved successfully." };
-    }
+      // Access the real browser hardware microphone stream
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
 
-    // Ensure action is standard uppercase
-    const action = (planData.action || "SAVE").toUpperCase();
-
-    // ==========================================
-    // STEP C (The Handler / Data Layer)
-    // ==========================================
-    if (action === "SAVE") {
-      const category = (planData.category || "General").trim();
-      const memory = (planData.memory || transcription).trim();
-
-      console.log(`Saving new memory in-memory: category=${category}, text="${memory}"`);
-      const newRecord: Memory = {
-        id: memoriesIdCounter++,
-        timestamp: new Date().toISOString(),
-        category,
-        memory,
-      };
-      memoryLedger.push(newRecord);
-
-      // Extract generated multilingual confirmation message or fallback
-      const finalMsg = planData.message && planData.message.trim()
-        ? planData.message.trim()
-        : `Memory safely logged under [${category}].`;
-
-      return res.json({
-        success: true,
-        action: "SAVE",
-        transcription,
-        providerUsed,
-        data: {
-          id: newRecord.id,
-          category,
-          memory,
-        },
-        message: finalMsg,
-      });
-    } else {
-      // SEARCH action
-      const query = (planData.query || transcription).trim();
-      console.log(`Executing semantic search for query keyword: "${query}"`);
-
-      // Retrieve all records to let GPT-4o perform semantic search & inflection resolution
-      const allRecords = [...memoryLedger].sort((a, b) => b.id - a.id);
-
-      const searchPrompt = `You are an expert AI search engine for a personal voice memory ledger.
-The user is asking a question: "${transcription}"
-The extracted search intent/query keyword is: "${query}"
-
-Here is the complete set of memory records retrieved from the SQLite database:
-${JSON.stringify(allRecords, null, 2)}
-
-Instructions:
-1. Perform a CONCEPTUAL and SEMANTIC matching of these memory records against the user's spoken question and search query keyword.
-2. Crucially, ensure you dynamically match words regardless of grammatical inflections, case variations, or language-specific suffixes in Marathi, Hindi, or English (for example, in Marathi: matching 'सेल्फोन' or 'फोन' against records containing 'सेल्फोनची', matching 'कपाट' against records containing 'कपाटात' or 'कपाटाजवळ', matching 'ड्रावर' against records containing 'ड्रावरमध्ये' etc.).
-3. Filter the records list to include ONLY those records that are actually relevant or conceptually answer the user's query.
-4. Formulate a natural, polite, and helpful answer for the user based strictly on the semantically matched records.
-5. Write the answer/message strictly in the EXACT same language and script used by the user in their spoken question. Do NOT translate it back to English. Avoid making up any facts. Be concise and conversational, ideal for transcription delivery.
-6. Return your response strictly as a valid JSON object matching the following TypeScript interface:
-{
-  "matchedRecords": Array<{ id: number; timestamp: string; category: string; memory: string }>;
-  "message": string;
-}`;
-
-      let brainSearchJsonText = "";
-      if (hasGemini) {
-        try {
-          console.log("Analyzing and matching memory records semantically using Gemini REST gemini-2.5-flash...");
-          brainSearchJsonText = await callGeminiREST(
-            searchPrompt,
-            undefined,
-            useGeminiKey
-          );
-        } catch (geminiSearchErr: any) {
-          console.warn("Gemini REST search matching failed, falling back to OpenAI GPT-4o...", geminiSearchErr);
-          if (hasOpenai) {
-            brainSearchJsonText = await callOpenaiSearch(searchPrompt, useOpenaiKey!);
-          } else {
-            throw geminiSearchErr;
-          }
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
-      } else {
-        console.log("Analyzing and matching memory records semantically using OpenAI gpt-4o...");
-        brainSearchJsonText = await callOpenaiSearch(searchPrompt, useOpenaiKey!);
-      }
+      };
 
-      let searchResultData: { matchedRecords?: any[]; message?: string } = {};
-      try {
-        searchResultData = JSON.parse(brainSearchJsonText);
-      } catch (parseErr) {
-        console.error("Failed to parse OpenAI search JSON, fallback to manual keyword lookup.", parseErr);
-        // Fallback to manual keyword filter if AI JSON fails
-        const filterStr = query.toLowerCase();
-        const fallbackMatched = allRecords.filter((r: any) => 
-          r.memory.toLowerCase().includes(filterStr) || r.category.toLowerCase().includes(filterStr)
-        );
-        searchResultData = {
-          matchedRecords: fallbackMatched,
-          message: fallbackMatched.length > 0 
-            ? `येथे काही संदर्भ सापडले आहेत जे "${query}" शी जुळतात.` 
-            : `मला तुमच्या माहितीमध्ये "${query}" बद्दल काही सापडले नाही.`
-        };
-      }
+      // When you stop the microphone, package the audio file and ship it to Render
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        
+        // Use FormData to match your backend's upload.single("audio") requirement
+        const formData = new FormData();
+        formData.append('audio', audioBlob, 'recording.webm');
+        formData.append('name', name || 'Anonymous');
 
-      const matchedRecords = searchResultData.matchedRecords || [];
-      const formulatedAnswer = searchResultData.message || "मला काही संदर्भ सापडले नाहीत.";
+        try {
+          setAiResponse("Processing voice file via SQL ledger...");
+          
+          const BACKEND_URL = 'https://ai-voice-diary.onrender.com';
+          const response = await fetch(`${BACKEND_URL}/api/process-voice`, {
+            method: 'POST',
+            body: formData, // Sends the audio file container seamlessly
+          });
 
-      return res.json({
-        success: true,
-        action: "SEARCH",
-        transcription,
-        providerUsed,
-        query,
-        matchedCount: matchedRecords.length,
-        message: formulatedAnswer,
-      });
-    }
+          const data = await response.json();
 
-  } catch (error: any) {
-    console.error("Error processing voice memory request:", error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Helper: Transcribe using Gemini 2.5 Flash REST API directly
-async function transcribeWithGemini(audioBuffer: Buffer, mimeType: string, apiKey?: string): Promise<string> {
-  const key = apiKey || process.env.GEMINI_API_KEY;
-  if (!key || key === "MY_GEMINI_API_KEY" || key.trim() === "") {
-    throw new Error("Gemini API key is missing.");
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key.trim()}`;
-  const base64Data = audioBuffer.toString("base64");
-
-  const body = {
-    contents: [
-      {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Data
-            }
-          },
-          {
-            text: "Transcribe this audio precisely in its original language. Avoid translating it into any other language. Return strictly the transcription in the exact script and language spoken by the user, without any introductory framing, summaries, titles, or extra comments."
+          // Map your server response to the visual layout fields
+          setDisplayText(data.transcription || data.text || "Voice captured cleanly");
+          
+          if (data.type === 'query' || data.isQuery) {
+            setDisplayType('query');
+            setAiResponse(data.reply || data.answer || "No matching memory trace found.");
+          } else {
+            setDisplayType('store');
           }
-        ]
-      }
-    ],
-    generationConfig: {
-      temperature: 0.1
+
+        } catch (error) {
+          console.error("Backend Server communication failed:", error);
+          setAiResponse("Server communication error. Please check your Render service logs.");
+        }
+
+        // Shut down the hardware mic stream lines safely to save iPhone battery
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Microphone hardware block:", err);
+      alert("Please allow microphone access permission in your mobile browser settings.");
     }
   };
 
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(body)
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini Transcribe REST API status ${response.status}: ${errorText}`);
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
     }
+  };
 
-    const data: any = await response.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    return text?.trim() || "";
-  } catch (err: any) {
-    console.error("Gemini Native REST Transcription failed:", err);
-    throw new Error(`Failed to transcribe audio using Gemini Fallback: ${err.message || err}`);
-  }
+  // 4. Premium Minimalist Presentation Canvas Layout
+  return (
+    <div className="fixed inset-0 bg-white flex flex-col justify-between p-6 overflow-hidden select-none">
+      
+      {/* TOP ROW: Application Branding & Persistent Name Input */}
+      <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-start pt-4 gap-4">
+        <h1 className="text-xl font-semibold text-black tracking-tight">
+          Voice Memory Ledger
+        </h1>
+        <div className="w-full max-w-xs mx-auto md:mx-0 flex flex-col items-center">
+          <input 
+            type="text" 
+            value={name} 
+            onChange={(e) => setName(e.target.value)}
+            className="w-full p-2 border-b-2 border-gray-300 text-center focus:outline-none focus:border-black text-lg font-medium text-black bg-transparent"
+          />
+          <span className="text-xs text-gray-400 mt-1 tracking-wide">
+            type your name
+          </span>
+        </div>
+      </div>
+
+      {/* CENTER ENGINE: Pulse Control Hub & Dynamic Response Cards */}
+      <div className="flex-1 flex flex-col items-center justify-center w-full">
+        <button 
+          onClick={isRecording ? stopRecording : startRecording}
+          className={`w-28 h-28 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-transform ${
+            isRecording ? 'bg-red-600 animate-pulse' : 'bg-black'
+          }`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 text-white">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
+          </svg>
+        </button>
+        
+        <p className="text-gray-500 text-sm mt-4 tracking-wide font-medium">
+          {isRecording ? 'Recording... Tap to Stop' : 'Press the MIC & speak'}
+        </p>
+
+        {/* Dynamic Display Board */}
+        {displayText && (
+          <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-100 text-center">
+            {displayType === 'store' && (
+              <p className="text-gray-700 text-sm font-medium">
+                Stored: <span className="text-black italic">"{displayText}"</span>
+              </p>
+            )}
+
+            {displayType === 'query' && (
+              <div className="space-y-2">
+                <p className="text-gray-400 text-xs tracking-wide uppercase font-semibold">Question</p>
+                <p className="text-gray-900 text-sm font-medium italic">"{displayText}"</p>
+                <div className="w-8 border-t-2 border-black mx-auto my-2"></div>
+                <p className="text-gray-400 text-xs tracking-wide uppercase font-semibold pt-1">Answer</p>
+                <p className="text-black text-base font-semibold tracking-tight">{aiResponse}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Localized Onboarding Examples */}
+        {!isRecording && !displayText && (
+          <div className="mt-6 flex flex-col items-center text-center text-xs text-gray-400 space-y-1 bg-gray-50 px-4 py-3 rounded-xl border border-gray-100 min-w-[240px]">
+            <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px] mb-1">Example</span>
+            <span>"My keys are on the table"</span>
+            <span className="italic text-gray-400 text-[11px]">then later ask...</span>
+            <span>"Where are my keys?"</span>
+            <div className="w-full border-t border-gray-200 my-2"></div>
+            <span className="text-gray-500 font-medium tracking-wide">speak any language</span>
+          </div>
+        )}
+      </div>
+
+      {/* BOTTOM HUB BALANCE */}
+      <div className="h-6"></div>
+    </div>
+  );
 }
 
-// Vite and static asset configuration
-async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  // Start full stack server on port 3000
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Voice Memory Ledger Server listening at http://localhost:${PORT}`);
-  });
-}
-
-startServer().catch((err) => {
-  console.error("Failed to bootstrap server:", err);
-});
-
-export default app;
+export default App;
