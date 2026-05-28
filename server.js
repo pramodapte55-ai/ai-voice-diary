@@ -61,7 +61,6 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const userName = req.body.name || "Anonymous";
 
         // Step A: Audio Transcription with Automatic Native Language Detection
-        // Removing the strict 'language' filter forces Whisper to detect Marathi vs English by cadence
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
@@ -70,7 +69,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const spokenText = transcriptionResponse.text;
         console.log(`[Captured Speech from ${userName}]: ${spokenText}`);
 
-        // Clean up temporary server storage file immediately to preserve disk space
+        // Clean up temporary server storage file immediately
         if (fs.existsSync(audioPath)) {
             fs.unlinkSync(audioPath);
         }
@@ -84,8 +83,9 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                     content: `You are the brain of a multi-lingual voice memory ledger. Analyze the incoming text.
                     1. Determine if the user is trying to STORE information or QUERY/ASK a question.
                     2. Provide an accurate English translation of the core meaning for uniform cross-language matching.
+                    3. Identify the exact language the user is speaking right now (e.g., "Marathi", "English", "Hindi").
                     Return your response strictly as a JSON object with these exact keys: 
-                    {"isQuery": true/false, "englishTranslation": "text here"}`
+                    {"isQuery": true/false, "englishTranslation": "text here", "detectedLanguage": "language name"}`
                 },
                 { role: "user", content: spokenText }
             ],
@@ -93,7 +93,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         });
 
         const analysis = JSON.parse(intentAnalysis.choices[0].message.content);
-        console.log(`[Intent Analysis]: Query=${analysis.isQuery}, Translation=${analysis.englishTranslation}`);
+        console.log(`[Intent Analysis]: Query=${analysis.isQuery}, Language=${analysis.detectedLanguage}`);
 
         // Step C: Routing Infrastructure
         if (analysis.isQuery) {
@@ -105,22 +105,33 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             );
 
             const pastMemories = dbResult.rows.map(row => 
-                `- Stored: "${row.original_text}" (English Translation meaning: "${row.english_translation}")`
+                `- Stored Memory: "${row.original_text}" (English Meaning: "${row.english_translation}")`
             ).join("\n");
 
-            // Direct an LLM processor to cross-reference logs and respond exclusively in English
+            // Direct an LLM processor to cross-reference logs and respond in the EXACT language of the current question
             const aiRecall = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                     {
                         role: "system",
                         content: `You are a memory retrieval assistant. Look through the user's past memories listed below. 
-                        Answer the user's question accurately based on their memories. 
-                        **CRITICAL RULE**: Always answer the user clearly in English, even if the past memories are recorded in Marathi or Hindi.`
+                        Answer the user's question accurately based on their records.
+                        
+                        **STEVE JOBS SYSTEM RULE**: You must formulate your final response to the user in the EXACT language they used to ask the question.
+                        - If the current question is asked in Marathi, your response MUST be written in beautiful, native Marathi script.
+                        - If the current question is asked in English, your response MUST be in English.
+                        Match the incoming query language perfectly, regardless of what language the original memories were recorded in.`
                     },
                     { 
                         role: "user", 
-                        content: `User Profile Name: ${userName}\n\nPast Memories Matrix:\n${pastMemories || "No previous records logged."}\n\nCurrent Question Spoken: "${spokenText}"\nEnglish Meaning: "${analysis.englishTranslation}"` 
+                        content: `User Profile Name: ${userName}
+                        Target Output Language: ${analysis.detectedLanguage}
+                        
+                        Past Memories Matrix:
+                        ${pastMemories || "No previous records logged."}
+                        
+                        Current Question Spoken: "${spokenText}"
+                        English Meaning: "${analysis.englishTranslation}"` 
                     }
                 ]
             });
@@ -128,21 +139,21 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             const finalAnswer = aiRecall.choices[0].message.content;
 
             return res.json({
-                transcription: spokenText, // Displays what you spoke in Marathi on your phone screen
+                transcription: spokenText, // Displays what you spoke on your phone screen
                 type: "query",
-                reply: finalAnswer // Displays the retrieved intelligence cleanly back to you in English
+                reply: finalAnswer // Displays the retrieved intelligence in the matching query language
             });
 
         } else {
             // --- MULTI-LINGUAL LEDGER STORAGE LOOP ---
-            // Record BOTH the raw audio transcription (Marathi text) and the structural English meaning
+            // Record BOTH the raw audio transcription and the structural English meaning
             await pool.query(
                 "INSERT INTO voice_ledger (user_name, original_text, english_translation) VALUES ($1, $2, $3)",
                 [userName, spokenText, analysis.englishTranslation]
             );
 
             return res.json({
-                transcription: spokenText, // Shows exactly what you spoke on screen
+                transcription: spokenText, 
                 type: "store"
             });
         }
