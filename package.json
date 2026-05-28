@@ -1,42 +1,22 @@
 {
-  "name": "react-example",
-  "private": true,
-  "version": "0.0.0",
+  "name": "ai-voice-diary-backend",
+  "version": "1.0.0",
+  "description": "Voice Memory Ledger API Server Engine",
+  "main": "server.js",
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
-    "build": "echo 'No build step needed'",
     "start": "node server.js",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "build": "npm install"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "better-sqlite3": "^12.10.0",
-    "cors": "^2.8.6",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "multer": "^2.1.1",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^4.33.0",
+    "pg": "^8.11.3"
   },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^4.17.21",
-    "@types/multer": "^2.1.0",
-    "@types/node": "^22.14.0",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3"
-  }
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "ISC"
 }
