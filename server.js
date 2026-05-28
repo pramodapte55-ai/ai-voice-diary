@@ -34,101 +34,94 @@ const initDb = async () => {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        console.log("Database initialized.");
+        console.log("Database initialized successfully.");
     } catch (err) {
-        console.error("Database failed:", err);
+        console.error("Database connection failure:", err);
     }
 };
 initDb();
 
 app.get("/", (req, res) => {
-    res.status(200).send("API Engine Active.");
+    res.status(200).send("API Engine Active and Listening.");
 });
 
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ error: "No audio received." });
+            return res.status(400).json({ error: "No audio file payload received." });
         }
 
         const audioPath = req.file.path;
         const userName = req.body.name || "Anonymous";
 
-        // Step A: Capture transcription
+        // Step A: Capture transcription cleanly
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
-            prompt: "माझी medicines कुठे आहेत? माझे जेवण table वर आहे. Where are my clothes? My bottle is here.",
         });
 
-        let rawSpokenText = transcriptionResponse.text;
-        console.log(`[Whisper Raw Capture]: ${rawSpokenText}`);
+        let rawSpokenText = transcriptionResponse.text || "";
+        console.log(`[Raw Audio Captured]: ${rawSpokenText}`);
 
         if (fs.existsSync(audioPath)) {
             fs.unlinkSync(audioPath);
         }
 
-        // ==========================================
-        // STEP B: CORE AI INTENT GATEKEEPER
-        // ==========================================
-        const intentCheck = await openai.chat.completions.create({
+        if (!rawSpokenText.trim()) {
+            return res.json({ transcription: "Audio unclear, please repeat.", type: "store" });
+        }
+
+        // Step B: Robust String Fallback Intent Detection
+        // If the spoken audio matches any core question markers, force query lookup immediately
+        const lowerText = rawSpokenText.toLowerCase();
+        const questionWords = [
+            'where', 'what', 'who', 'how', 'which', 'when', '?', 
+            'कुठे', 'काय', 'कोण', 'कसे', 'केव्हा', 'कहाँ', 'किधर',
+            'kuthe', 'kothe', 'ahet', 'aahe', 'elley', 'ellide'
+        ];
+        
+        let isQuery = questionWords.some(word => lowerText.includes(word));
+
+        // Step C: Streamlined AI Processing (No Complex Variable Script Rules)
+        const textAnalysis = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are an intent gatekeeper for a voice memory ledger app. 
-                    Analyze the text input. Determine if the user is asking a question to FIND/RETRIEVE something, or if they are just stating a fact to store.
+                    content: `You are a linguistic sanitizer for a private voice diary ledger.
+                    Your objective is to review the raw phrase provided and return a clean, grammatically polished version.
                     
-                    CRITICAL: If the sentence asks "where is", "where are", "कुठे", "kuthe", "kothe", "ahet", "aahe", "find", or has a question mark, you MUST flag it as a query.
-                    Respond ONLY with a JSON object containing the boolean key "isQuery".`
+                    STRICT SCRIPT DIRECTIVES:
+                    1. If the sentence is spoken in English, preserve it ENTIRELY in the English alphabet (Roman script). Do not translate or change it to Devanagari characters.
+                    2. If spoken in Marathi or mixed Hindi/Marathi, output it in clean, grammatically perfect Devanagari script, leaving explicit English nouns (like medicines, box, charger, bottle) in the English alphabet.
+                    3. Provide a clear English translation translation string for back-end uniformity.`
                 },
                 { role: "user", content: rawSpokenText }
-            ],
-            response_format: { type: "json_object" }
+            ]
         });
 
-        const intentResult = JSON.parse(intentCheck.choices[0].message.content);
-        const isQueryFlag = intentResult.isQuery;
-        console.log(`[AI Intent Gatekeeper]: isQuery = ${isQueryFlag}`);
-
-        // ==========================================
-        // STEP C: GRAMMAR SCRIPT PRESERVATION ENGINE
-        // ==========================================
-        const grammarAnalysis = await openai.chat.completions.create({
+        const cleanedTranslationPayload = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
-                {
-                    role: "system",
-                    content: `You are an expert multi-lingual editor. Clean the text up into flawless grammar based on these strict script rules:
-                    
-                    1. PURE ENGLISH RULE: If the user spoke entirely in English (e.g., "My clothes are in the cupboard" or "where is my bottle"), you MUST keep the output entirely in the English alphabet (Roman script). Do NOT convert English words into Devanagari script.
-                    2. MIXED LANGUAGE RULE: If the user speaks a mix of an Indian language and English words (e.g., "माझी medicines कुठे आहेत?"), keep the English nouns in English alphabet letters, and keep the surrounding native words in their true native script (Devanagari, Tamil, etc.).
-                    3. PURE REGIONAL RULE: If they speak completely in Marathi/Hindi, use pure, beautiful Devanagari script characters.
-                    4. Provide a clear, standard English translation for backend lookup data uniformization.
-
-                    Return ONLY JSON with these exact keys:
-                    {"correctedText": "text here", "englishTranslation": "text here", "detectedLanguage": "language name"}`
-                },
+                { role: "system", content: "Translate the user's input phrase accurately into plain English text summary. Return ONLY the raw translated text string." },
                 { role: "user", content: rawSpokenText }
-            ],
-            response_format: { type: "json_object" }
+            ]
         });
 
-        const analysis = JSON.parse(grammarAnalysis.choices[0].message.content);
-        let polishedText = analysis.correctedText;
-        let englishTranslation = analysis.englishTranslation;
+        const polishedText = textAnalysis.choices[0].message.content.trim();
+        const englishTranslation = cleanedTranslationPayload.choices[0].message.content.trim();
 
-        console.log(`[Polished Text Output]: ${polishedText}`);
+        console.log(`[Routed Script]: Polished="${polishedText}" | QueryMode=${isQuery}`);
 
-        if (isQueryFlag) {
-            // --- RECALL LOOP ---
+        if (isQuery) {
+            // --- DATA RECALL HANDLER ---
             const dbResult = await pool.query(
-                "SELECT original_text, english_translation FROM voice_ledger WHERE user_name = $1 ORDER BY created_at DESC LIMIT 50",
+                "SELECT original_text, english_translation FROM voice_ledger WHERE user_name = $1 ORDER BY created_at DESC LIMIT 40",
                 [userName]
             );
 
             const pastMemories = dbResult.rows.map(row => 
-                `- Stored Memory: "${row.original_text}" (English Meaning: "${row.english_translation}")`
+                `- Stored Fact: "${row.original_text}" (English Concept: "${row.english_translation}")`
             ).join("\n");
 
             const aiRecall = await openai.chat.completions.create({
@@ -136,20 +129,21 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                 messages: [
                     {
                         role: "system",
-                        content: `You are a premium memory retrieval assistant. Look through the user's past memories and answer their question accurately.
+                        content: `You are a memory retrieval ledger assistant. Search the user's logged facts to answer their question.
                         
-                        **SCRIPT RULE**: Formulate the response in the exact same language style as the question.
-                        - If the question is asked in pure English, reply in pure English.
-                        - If the question is a blend of Marathi and English, reply using that same natural spoken blend, keeping English words in English letters.`
+                        CRITICAL DISPLAY REQUIREMENT:
+                        - Formulate your answer in the EXACT language script style used in the question.
+                        - If the question is in pure English, answer in plain English.
+                        - If the question contains Marathi or a mixed code-switch style, answer in proper Devanagari text, maintaining conversational English words in the Roman alphabet.`
                     },
                     { 
                         role: "user", 
-                        content: `User: ${userName}\nPast Records:\n${pastMemories || "None"}\n\nQuestion: "${polishedText}"\nEnglish Meaning: "${englishTranslation}"` 
+                        content: `User Profile: ${userName}\nHistorical Records Ledger:\n${pastMemories || "No entries logged."}\n\nCurrent Question: "${polishedText}"\nEnglish Meaning: "${englishTranslation}"` 
                     }
                 ]
             });
 
-            const finalAnswer = aiRecall.choices[0].message.content;
+            const finalAnswer = aiRecall.choices[0].message.content.trim();
 
             return res.json({
                 transcription: polishedText,
@@ -158,7 +152,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             });
 
         } else {
-            // --- STORAGE LOOP ---
+            // --- DATA STORAGE HANDLER ---
             await pool.query(
                 "INSERT INTO voice_ledger (user_name, original_text, english_translation) VALUES ($1, $2, $3)",
                 [userName, polishedText, englishTranslation]
@@ -171,11 +165,11 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         }
 
     } catch (error) {
-        console.error("Crash caught:", error);
-        res.status(500).json({ error: "Processing error." });
+        console.error("Pipeline Exception Caught:", error);
+        res.status(500).json({ error: "Internal architecture processing timeout." });
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Live on port ${PORT}`);
+    console.log(`Execution active on port ${PORT}`);
 });
