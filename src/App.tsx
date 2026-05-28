@@ -33,9 +33,8 @@ function App() {
         setDisplayType(isQuery ? 'query' : 'store');
 
         try {
-          // --- CHANGE THIS LINK TO YOUR ACTUAL RENDER LINK IF AVAILABLE ---
-          const BACKEND_URL = 'https://YOUR-RENDER-BACKEND-URL.onrender.com';
-          
+    // --- CHANGE THIS LINK TO YOUR ACTUAL RENDER LINK IF AVAILABLE ---
+          const BACKEND_URL = 'https://ai-voice-diary.onrender.com';
           const response = await fetch(`${BACKEND_URL}/api/voice`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
