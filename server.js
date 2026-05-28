@@ -58,7 +58,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
-            prompt: "माझी medicines कुठे आहेत? माझे जेवण table वर आहे. Where are my keys? கார் சாவி எங்கே? ನನ್ನ ಮೆಡಿಸಿನ್ ಎಲ್ಲಿದೆ?",
+            prompt: "माझी medicines कुठे आहेत? माझे जेवण table वर आहे. Where are my clothes? My bottle is here.",
         });
 
         let rawSpokenText = transcriptionResponse.text;
@@ -69,21 +69,18 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         }
 
         // ==========================================
-        // CRITICAL STEP B: ULTIMATE AI INTENT GATEKEEPER
-        // Before parsing grammar or scripts, we force a high-accuracy check for questions.
+        // STEP B: CORE AI INTENT GATEKEEPER
         // ==========================================
         const intentCheck = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are an absolute intent gatekeeper for a voice memory app. 
-                    Analyze the user's input (which might be garbled, written in Hinglish, Marathingli, or native script).
-                    Determine if the user is asking a question to find/retrieve something, or if they are just stating a fact to store.
+                    content: `You are an intent gatekeeper for a voice memory ledger app. 
+                    Analyze the text input. Determine if the user is asking a question to FIND/RETRIEVE something, or if they are just stating a fact to store.
                     
-                    CRITICAL RULES:
-                    - If the text contains any questioning context like "where is", "kuthe", "kothe", "ahet", "aahe", "find", "எங்கே", "ಎಲ್ಲಿದೆ", or sounds like a question, you MUST return true.
-                    - Respond ONLY with a clean JSON object containing the boolean key "isQuery".`
+                    CRITICAL: If the sentence asks "where is", "where are", "कुठे", "kuthe", "kothe", "ahet", "aahe", "find", or has a question mark, you MUST flag it as a query.
+                    Respond ONLY with a JSON object containing the boolean key "isQuery".`
                 },
                 { role: "user", content: rawSpokenText }
             ],
@@ -92,21 +89,22 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
 
         const intentResult = JSON.parse(intentCheck.choices[0].message.content);
         const isQueryFlag = intentResult.isQuery;
-        console.log(`[AI Intent Gatekeeper Decision]: isQuery = ${isQueryFlag}`);
-        // ==========================================
+        console.log(`[AI Intent Gatekeeper]: isQuery = ${isQueryFlag}`);
 
-        // Step C: Detailed Grammar Cleaning & Script Restoration
+        // ==========================================
+        // STEP C: GRAMMAR SCRIPT PRESERVATION ENGINE
+        // ==========================================
         const grammarAnalysis = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are an expert multi-lingual editor. Clean the text up.
+                    content: `You are an expert multi-lingual editor. Clean the text up into flawless grammar based on these strict script rules:
                     
-                    CRITICAL SCRIPT RULES:
-                    1. Keep explicit English nouns (e.g., "medicines", "box", "charger", "keys") strictly in the English alphabet (Roman letters). Do NOT write them in Devanagari or other regional scripts.
-                    2. Convert all surrounding text into pristine, grammatically accurate native script (Devanagari for Marathi/Hindi, Tamil script for Tamil, etc.). Fix all spelling issues.
-                    3. Provide a clear, structural English translation for uniform backend lookup.
+                    1. PURE ENGLISH RULE: If the user spoke entirely in English (e.g., "My clothes are in the cupboard" or "where is my bottle"), you MUST keep the output entirely in the English alphabet (Roman script). Do NOT convert English words into Devanagari script.
+                    2. MIXED LANGUAGE RULE: If the user speaks a mix of an Indian language and English words (e.g., "माझी medicines कुठे आहेत?"), keep the English nouns in English alphabet letters, and keep the surrounding native words in their true native script (Devanagari, Tamil, etc.).
+                    3. PURE REGIONAL RULE: If they speak completely in Marathi/Hindi, use pure, beautiful Devanagari script characters.
+                    4. Provide a clear, standard English translation for backend lookup data uniformization.
 
                     Return ONLY JSON with these exact keys:
                     {"correctedText": "text here", "englishTranslation": "text here", "detectedLanguage": "language name"}`
@@ -120,8 +118,10 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         let polishedText = analysis.correctedText;
         let englishTranslation = analysis.englishTranslation;
 
+        console.log(`[Polished Text Output]: ${polishedText}`);
+
         if (isQueryFlag) {
-            // --- CROSS-LANGUAGE RETRIEVAL ENGINE ---
+            // --- RECALL LOOP ---
             const dbResult = await pool.query(
                 "SELECT original_text, english_translation FROM voice_ledger WHERE user_name = $1 ORDER BY created_at DESC LIMIT 50",
                 [userName]
@@ -138,9 +138,9 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                         role: "system",
                         content: `You are a premium memory retrieval assistant. Look through the user's past memories and answer their question accurately.
                         
-                        **STRICT SCRIPT RULE**: Formulate the response in the exact same language style as the question.
-                        - If the question contains English words mixed with an Indian language (e.g., "माझी medicines कुठे आहेत?"), reply using that exact same natural blend (e.g., "तुमची medicines त्या box मध्ये आहेत."). 
-                        - Keep English words in the English alphabet, and native words in their native script (Devanagari, Tamil, etc.). Fix all grammar.`
+                        **SCRIPT RULE**: Formulate the response in the exact same language style as the question.
+                        - If the question is asked in pure English, reply in pure English.
+                        - If the question is a blend of Marathi and English, reply using that same natural spoken blend, keeping English words in English letters.`
                     },
                     { 
                         role: "user", 
@@ -158,7 +158,7 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             });
 
         } else {
-            // --- LEDGER STORAGE ENGINE ---
+            // --- STORAGE LOOP ---
             await pool.query(
                 "INSERT INTO voice_ledger (user_name, original_text, english_translation) VALUES ($1, $2, $3)",
                 [userName, polishedText, englishTranslation]
