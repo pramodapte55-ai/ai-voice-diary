@@ -26,7 +26,7 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false } // Required for secure cloud database connections
 });
 
-// Database initialization helper (creates table automatically if missing)
+// Database initialization helper
 const initDb = async () => {
     try {
         await pool.query(`
@@ -50,7 +50,7 @@ app.get("/", (req, res) => {
     res.status(200).send("Voice Memory Ledger API Engine is awake and active.");
 });
 
-// 4. CORE ENGINE: Process Voice Audio Stream with Auto-Language Detection & LLM Grammar Correction
+// 4. CORE ENGINE: Process Voice Audio Stream with Mixed-Language Intelligence
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
     try {
         if (!req.file) {
@@ -60,11 +60,11 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         const audioPath = req.file.path;
         const userName = req.body.name || "Anonymous";
 
-        // Step A: Capture Raw Audio Audio Transcription
+        // Step A: Capture Raw Audio Transcription
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
-            prompt: "माझे जेवण टेबलवर आहे. माझी चावी कपाटात आहे. Where is my food? Multi-lingual voice memory diary tracking Marathi and English.",
+            prompt: "माझी medicines कुठे आहेत? माझे जेवण टेबलवर आहे. माझी चावी kapaat मध्ये आहे. Where are my keys? Multi-lingual conversational ledger handling mixed Marathi and English speech seamlessly.",
         });
 
         const rawSpokenText = transcriptionResponse.text;
@@ -75,23 +75,24 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             fs.unlinkSync(audioPath);
         }
 
-        // Step B: LINGUISTIC SANITIZER & INTENT ANALYSIS (The Grammar Correction Engine)
-        // This step completely rewrites any messy script or hallucinated typos into perfect, natural grammar.
+        // Step B: INTENT SANITIZER & MIXED-LANGUAGE INTERPRETER
+        // This upgraded system instruction explicitly handles mixed language inputs.
         const grammarAndIntentAnalysis = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are an expert multi-lingual editor and brain for a voice memory ledger. Your job is to analyze the raw, messy transcription text from a microphone and fix it completely.
+                    content: `You are an expert multi-lingual editor for an advanced voice diary ledger. 
+                    The user frequently mixes English words into Marathi sentences (e.g., saying "माझी medicines कुठे आहेत?" or "mobile चार्जिंगला लावला आहे").
 
                     Follow these strict execution steps:
-                    1. Identify what language the user is speaking (e.g., "Marathi", "English").
-                    2. CRITICAL: Correct the grammar, fix any spelling mistakes, remove hallucinated words, and polish the text so it looks like a natural, perfectly written sentence in that language. If it is Marathi, it must be written in flawless, grammatically accurate Devanagari script (e.g., fix bad endings, use proper words like 'कपाटात', 'टेबलवर').
-                    3. Determine if the user is trying to STORE information or QUERY/ASK a question.
-                    4. Provide an accurate, clear English translation of the core meaning for uniform backend lookup.
+                    1. Clean up the text. If they use an English word in a Marathi sentence, preserve the English word cleanly in Roman script or proper Devanagari so it reads naturally and professionally (e.g., "माझी medicines कुठे आहेत?"). Fix any messy microphone typos.
+                    2. Determine if the user is trying to STORE information or QUERY/ASK a question.
+                    3. Provide a high-precision English translation of the core meaning. If they ask about "medicines", ensure the English translation uses "medicines" or "medication" so it easily matches past entries.
+                    4. Identify the dominant language style they used for display purposes.
 
                     Return your response strictly as a JSON object with these exact keys:
-                    {"correctedText": "perfectly polished text here", "isQuery": true/false, "englishTranslation": "accurate English meaning text here", "detectedLanguage": "language name"}`
+                    {"correctedText": "clean formatted sentence here", "isQuery": true/false, "englishTranslation": "clear core English meaning here", "detectedLanguage": "language name"}`
                 },
                 { role: "user", content: rawSpokenText }
             ],
@@ -99,15 +100,14 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         });
 
         const analysis = JSON.parse(grammarAndIntentAnalysis.choices[0].message.content);
-        const polishedText = analysis.correctedText; // This is our clean, hallucination-free text!
+        const polishedText = analysis.correctedText;
         
         console.log(`[LLM Cleaned Text]: ${polishedText}`);
-        console.log(`[Intent Analysis]: Query=${analysis.isQuery}, Language=${analysis.detectedLanguage}`);
+        console.log(`[Intent Analysis]: Query=${analysis.isQuery}, Translation Link=${analysis.englishTranslation}`);
 
         // Step C: Routing Infrastructure
         if (analysis.isQuery) {
             // --- CROSS LANGUAGE RECALL LOOP ---
-            // Fetch all past history records from Postgres SQL ledger for this specific user profile
             const dbResult = await pool.query(
                 "SELECT original_text, english_translation FROM voice_ledger WHERE user_name = $1 ORDER BY created_at DESC LIMIT 50",
                 [userName]
@@ -117,30 +117,29 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                 `- Stored Memory: "${row.original_text}" (English Meaning: "${row.english_translation}")`
             ).join("\n");
 
-            // Direct the LLM to cross-reference logs and respond in pristine, matching query language grammar
+            // Direct the LLM to cross-reference conceptual meanings, ignoring any language barriers or mixed words
             const aiRecall = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                     {
                         role: "system",
                         content: `You are a premium memory retrieval assistant. Look through the user's past memories listed below. 
-                        Answer the user's question accurately based on their records.
+                        Answer the user's question accurately based on the conceptual meaning of their records.
                         
-                        **SYSTEM RULE**: You must formulate your final response to the user in the EXACT language they used to ask the question.
-                        - If the current question is asked in Marathi, your response MUST be written in beautiful, native, grammatically flawless Devanagari script.
-                        - If the current question is asked in English, your response MUST be in clear, proper English.
-                        Never mix languages or return garbled text.`
+                        **SYSTEM RULE**: You must formulate your final response to the user in the EXACT language style they used to ask the question.
+                        - If they ask using a mix of Marathi and English (e.g., "माझी medicines कुठे आहेत?"), reply back in natural conversational Marathi, incorporating English terms where it makes the sentence sound fluid and conversational (e.g., "तुमची medicines कपाटाच्या पहिल्या कप्प्यात ठेवली आहेत.").
+                        - Ensure the Devanagari script is beautiful, perfectly punctuated, and grammatically flawless.`
                     },
                     { 
                         role: "user", 
                         content: `User Profile Name: ${userName}
-                        Target Output Language: ${analysis.detectedLanguage}
+                        Target Output Language Context: ${analysis.detectedLanguage}
                         
                         Past Memories Matrix:
                         ${pastMemories || "No previous records logged."}
                         
                         Current Question Spoken (Polished): "${polishedText}"
-                        English Meaning: "${analysis.englishTranslation}"` 
+                        English Meaning Lookup Concept: "${analysis.englishTranslation}"` 
                     }
                 ]
             });
@@ -148,21 +147,20 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             const finalAnswer = aiRecall.choices[0].message.content;
 
             return res.json({
-                transcription: polishedText, // Displays the clean, perfectly punctuated question on your phone screen
+                transcription: polishedText, // Displays the clean blended question on your screen
                 type: "query",
-                reply: finalAnswer // Displays the retrieved intelligence in pristine matching script
+                reply: finalAnswer // Displays the retrieved intelligence in matching conversational script
             });
 
         } else {
             // --- MULTI-LINGUAL LEDGER STORAGE LOOP ---
-            // Record BOTH the polished transcription and the structural English meaning into the SQL ledger
             await pool.query(
                 "INSERT INTO voice_ledger (user_name, original_text, english_translation) VALUES ($1, $2, $3)",
                 [userName, polishedText, analysis.englishTranslation]
             );
 
             return res.json({
-                transcription: polishedText, // Shows the beautiful, grammatically correct text on screen
+                transcription: polishedText, 
                 type: "store"
             });
         }
