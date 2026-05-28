@@ -19,13 +19,11 @@ function App() {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      // Failsafe: Open the install availability channel immediately on the UI canvas
       setIsInstallAvailable(true);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // If already launched inside standalone installed mode, hide install buttons
     if (window.matchMedia('(display-mode: standalone)').matches) {
       setIsInstallAvailable(false);
     }
@@ -37,7 +35,6 @@ function App() {
 
   const triggerNativeInstallApp = async () => {
     if (!deferredPrompt) {
-      // If the browser hidden prompt hasn't fired yet, give clear instructions
       alert("To install: Tap the 3 vertical dots in the top-right corner of Chrome, then select 'Add to Home screen'.");
       return;
     }
@@ -96,9 +93,13 @@ function App() {
           setProcessingStatus('');
 
           const data = await response.json();
+          console.log("Synchronized Response Payload:", data);
+
+          // Force the transcription view to show the beautifully cleaned script
           const spokenText = data.transcription || "";
           setDisplayText(spokenText);
 
+          // FIX RULE: We now trust the backend decision engine ("query" vs "store") directly!
           if (data.type === "query") {
             setDisplayType('query');
             setAiResponse(data.reply || "No direct memory trace found.");
@@ -107,7 +108,7 @@ function App() {
           }
 
         } catch (error) {
-          console.error("Backend failed:", error);
+          console.error("Backend communication failure:", error);
           setProcessingStatus('');
           setAiResponse("Could not reach backend memory ledger.");
         }
@@ -139,8 +140,6 @@ function App() {
           <h1 className="text-xl font-semibold text-black tracking-tight">
             Voice Memory Ledger
           </h1>
-          
-          {/* ALWAYS ACCESSIBLE MANUAL APP INSTALLATION ACTION BUTTON */}
           <button
             onClick={triggerNativeInstallApp}
             className="mt-1 flex items-center space-x-1.5 text-xs font-semibold text-gray-500 bg-gray-100 hover:bg-black hover:text-white px-2.5 py-1 rounded-full border border-gray-200 shadow-sm transition-all"
@@ -199,12 +198,12 @@ function App() {
             )}
 
             {displayType === 'query' && (
-              <div className="space-y-2">
+              <div className="space-y-2 animate-fade-in">
                 <p className="text-gray-400 text-xs tracking-wide uppercase font-semibold">Question</p>
                 <p className="text-gray-900 text-sm font-medium italic">"{displayText}"</p>
                 <div className="w-8 border-t-2 border-black mx-auto my-2"></div>
                 <p className="text-gray-400 text-xs tracking-wide uppercase font-semibold pt-1">Answer</p>
-                <p className="text-black text-base font-semibold tracking-tight">{aiResponse}</p>
+                <p className="text-black text-base font-bold tracking-tight">{aiResponse}</p>
               </div>
             )}
           </div>
@@ -214,9 +213,9 @@ function App() {
         {!isRecording && !displayText && !processingStatus && (
           <div className="mt-6 flex flex-col items-center text-center text-xs text-gray-400 space-y-1 bg-gray-50 px-4 py-3 rounded-xl border border-gray-100 min-w-[240px]">
             <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px] mb-1">Example</span>
-            <span>"My keys are on the table"</span>
+            <span>"My clothes are in the cupboard"</span>
             <span className="italic text-gray-400 text-[11px]">then later ask...</span>
-            <span>"Where are my keys?"</span>
+            <span>"Where are my clothes?"</span>
             <div className="w-full border-t border-gray-200 my-2"></div>
             <span className="text-gray-500 font-medium tracking-wide">speak in Marathi or English</span>
           </div>
