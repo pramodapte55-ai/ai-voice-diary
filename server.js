@@ -9,24 +9,20 @@ const { Pool } = require("pg");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// 1. Middleware Settings
 app.use(cors());
 app.use(express.json());
 
-// Configure file storage for incoming mobile raw audio files
 const upload = multer({ dest: "uploads/" });
 
-// 2. Initialize AI API Engine & SQL Database Pool Connections
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false } // Required for secure cloud database connections
+    ssl: { rejectUnauthorized: false }
 });
 
-// Database initialization helper
 const initDb = async () => {
     try {
         await pool.query(`
@@ -38,61 +34,57 @@ const initDb = async () => {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        console.log("Database tables verified/initialized successfully.");
+        console.log("Database initialized.");
     } catch (err) {
-        console.error("Database initialization failed:", err);
+        console.error("Database failed:", err);
     }
 };
 initDb();
 
-// 3. Absolute Root Health-Check Path
 app.get("/", (req, res) => {
-    res.status(200).send("Voice Memory Ledger API Engine is awake and active.");
+    res.status(200).send("API Engine Active.");
 });
 
-// 4. CORE ENGINE: Process Voice Audio Stream with Robust Intent Matching
 app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ error: "No audio file payload received." });
+            return res.status(400).json({ error: "No audio received." });
         }
 
         const audioPath = req.file.path;
         const userName = req.body.name || "Anonymous";
 
-        // Step A: Capture Raw Audio Transcription
+        // Step A: Capture transcription
         const transcriptionResponse = await openai.audio.transcriptions.create({
             file: fs.createReadStream(audioPath),
             model: "whisper-1",
-            prompt: "माझी medicines कुठे आहेत? माझे जेवण table वर आहे. माझी चावी box मध्ये आहे. Where are my things? Multi-lingual conversational ledger handling mixed script environments flawlessly.",
+            prompt: "माझी medicines कुठे आहेत? माझे जेवण table वर आहे. Where are my keys? கார் சாவி எங்கே? ನನ್ನ ಮೆಡಿಸಿನ್ ಎಲ್ಲಿದೆ?",
         });
 
-        const rawSpokenText = transcriptionResponse.text;
-        console.log(`[Whisper Raw Capture]: ${rawSpokenText}`);
+        let rawSpokenText = transcriptionResponse.text;
+        console.log(`[Whisper Raw]: ${rawSpokenText}`);
 
-        // Clean up temporary server storage file immediately
         if (fs.existsSync(audioPath)) {
             fs.unlinkSync(audioPath);
         }
 
-        // Step B: BULLETPROOF LINGUISTIC SANITIZER & INTENT DETECTOR
+        // Step B: AI Clean-up and Translation
         const grammarAndIntentAnalysis = await openai.chat.completions.create({
             model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: `You are an expert multi-lingual editor and intent interpreter for a voice ledger. 
-                    The user speaks a mix of regional Indian languages (like Marathi, Tamil, Kannada, Hindi) and English words.
-                    Sometimes the microphone transcription returns garbled text or spells native words using Roman letters (e.g. "mazi ushady kotheu ahe").
+                    content: `You are an expert multi-lingual voice ledger editor.
+                    Fix the raw transcription into high-quality grammar. 
+                    
+                    CRITICAL SCRIPT RULES:
+                    1. Keep explicit English words (e.g., "medicines", "box", "charger", "keys") strictly in the English alphabet (Roman script). Do NOT phonetically write them in Devanagari, Tamil, or Kannada script.
+                    2. Convert the rest of the sentence into beautiful, correct native script (Devanagari for Marathi/Hindi, Tamil script for Tamil, etc.).
+                    3. Determine if it is a question (isQuery: true) or a statement (isQuery: false).
+                    4. Provide a flawless English translation.
 
-                    Your job is to fix it completely based on these strict guidelines:
-                    1. **Script Restoration**: If the user spoke in an Indian language but it got written in English alphabets, you MUST translate/rewrite it into its proper native script (e.g., "mazi ushady kotheu ahe" must become "माझी औषधे कुठे आहेत?").
-                    2. **English Noun Preservation**: If an explicit English word is spoken (like "medicines", "box", "car", "charger"), keep that word written in clean English letters (Roman alphabet). Do not write it phonetically in Devanagari.
-                    3. **Intent Detection**: Carefully analyze if the user is asking a question or trying to search their memory. Look out for question words across languages ("where", "what", "कुठे", "काये", "कहाँ", "kuthe", "kotheu"). If it is a question, "isQuery" MUST be true.
-                    4. **Meaning Extraction**: Provide a clear, perfectly accurate English translation of the core meaning for back-end database matching.
-
-                    Return your response strictly as a JSON object with these exact keys:
-                    {"correctedText": "flawless native script with english words preserved", "isQuery": true/false, "englishTranslation": "clear core English meaning here", "detectedLanguage": "language name"}`
+                    Return ONLY JSON with these exact keys:
+                    {"correctedText": "text here", "isQuery": true/false, "englishTranslation": "text here", "detectedLanguage": "language name"}`
                 },
                 { role: "user", content: rawSpokenText }
             ],
@@ -100,14 +92,37 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         });
 
         const analysis = JSON.parse(grammarAndIntentAnalysis.choices[0].message.content);
-        const polishedText = analysis.correctedText;
         
-        console.log(`[Sanitized Text]: ${polishedText}`);
-        console.log(`[Intent Analysis]: Query=${analysis.isQuery}, Translation Link=${analysis.englishTranslation}`);
+        let polishedText = analysis.correctedText;
+        let isQueryFlag = analysis.isQuery;
+        let englishTranslation = analysis.englishTranslation;
 
-        // Step C: Routing Infrastructure
-        if (analysis.isQuery) {
-            // --- CROSS LANGUAGE RECALL LOOP ---
+        // ==========================================
+        // HARDCODED STEVE JOBS FAILSAFE OVERRIDE TRACK
+        // If the AI or Whisper makes a mistake, this hard logic catches it instantly!
+        // ==========================================
+        const lowerRaw = rawSpokenText.toLowerCase();
+        const lowerPolished = polishedText.toLowerCase();
+        
+        // Comprehensive list of question triggers across English, Marathi, Hindi, Tamil, Kannada
+        const questionTriggers = [
+            'कुठे', 'आहेत', 'आहे', 'काय', 'kuthe', 'kotheu', 'ahet', 'aahe', 
+            'where', 'what', 'where is', 'எங்கே', 'எங்க', 'எது', 'எல்லಿದೆ', 'ಯಲ್ಲಿದೆ',
+            'ಕಹಾನ್', 'कहाँ', 'किधर', 'किकडे'
+        ];
+
+        const containsQuestionWord = questionTriggers.some(word => 
+            lowerRaw.includes(word) || lowerPolished.includes(word)
+        );
+
+        if (containsQuestionWord) {
+            console.log("[FAILSAFE TRIGGERED]: Forced intent routing to QUERY/RECALL due to keyword match.");
+            isQueryFlag = true;
+        }
+        // ==========================================
+
+        if (isQueryFlag) {
+            // --- CROSS-LANGUAGE RETRIEVAL ENGINE ---
             const dbResult = await pool.query(
                 "SELECT original_text, english_translation FROM voice_ledger WHERE user_name = $1 ORDER BY created_at DESC LIMIT 50",
                 [userName]
@@ -117,29 +132,20 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
                 `- Stored Memory: "${row.original_text}" (English Meaning: "${row.english_translation}")`
             ).join("\n");
 
-            // Direct the LLM to process cross-language matching and output elegant, matching native text
             const aiRecall = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
                     {
                         role: "system",
-                        content: `You are a premium memory retrieval assistant. Look through the user's past memories listed below. 
-                        Answer the user's question accurately based on the contextual meaning of their records.
+                        content: `You are a memory retrieval assistant. Look through the user's past memories. Answer their question accurately.
                         
-                        **SYSTEM RULE**: Formulate your final response to the user in the EXACT language style they used to ask the question.
-                        - If they ask in Marathi or a Marathi-English blend, answer them in beautiful, grammatically correct Devanagari script, keeping any native English nouns (like medicines, box) in the English alphabet.
-                        - Match the language of the query perfectly, regardless of what language the original memories were recorded in.`
+                        **STRICT SCRIPT RULE**: Formulate the response in the exact same language style as the question.
+                        - If the question contains English words mixed with an Indian language (e.g., "माझी medicines कुठे आहेत?"), reply using that exact same natural blend (e.g., "तुमची medicines त्या box मध्ये आहेत."). 
+                        - Keep English words in the English alphabet, and native words in their native script (Devanagari, Tamil, etc.). Fix all grammar.`
                     },
                     { 
                         role: "user", 
-                        content: `User Profile Name: ${userName}
-                        Target Output Language Context: ${analysis.detectedLanguage}
-                        
-                        Past Memories Matrix:
-                        ${pastMemories || "No previous records logged."}
-                        
-                        Current Question Spoken (Polished): "${polishedText}"
-                        English Meaning Lookup Concept: "${analysis.englishTranslation}"` 
+                        content: `User: ${userName}\nPast Records:\n${pastMemories || "None"}\n\nQuestion: "${polishedText}"\nEnglish Meaning: "${englishTranslation}"` 
                     }
                 ]
             });
@@ -147,16 +153,16 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
             const finalAnswer = aiRecall.choices[0].message.content;
 
             return res.json({
-                transcription: polishedText, // Displays clean script on screen
+                transcription: polishedText,
                 type: "query",
-                reply: finalAnswer // Displays answer in perfect matching language script
+                reply: finalAnswer
             });
 
         } else {
-            // --- MULTI-LINGUAL LEDGER STORAGE LOOP ---
+            // --- LEDGER STORAGE ENGINE ---
             await pool.query(
                 "INSERT INTO voice_ledger (user_name, original_text, english_translation) VALUES ($1, $2, $3)",
-                [userName, polishedText, analysis.englishTranslation]
+                [userName, polishedText, englishTranslation]
             );
 
             return res.json({
@@ -166,12 +172,11 @@ app.post("/api/process-voice", upload.single("audio"), async (req, res) => {
         }
 
     } catch (error) {
-        console.error("Backend pipeline crash caught:", error);
-        res.status(500).json({ error: "Internal processing error running multi-lingual memory maps." });
+        console.error("Crash caught:", error);
+        res.status(500).json({ error: "Processing error." });
     }
 });
 
-// 5. Start Server Engine Listener
 app.listen(PORT, () => {
-    console.log(`Server executing live on port ${PORT}`);
+    console.log(`Live on port ${PORT}`);
 });
