@@ -8,29 +8,26 @@ function App() {
   const [aiResponse, setAiResponse] = useState('');
   const [processingStatus, setProcessingStatus] = useState('');
 
-  // PWA Automatic Installation State Trackers
+  // PWA Automated & Manual Installation State Trackers
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [isInstallAvailable, setIsInstallAvailable] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // STEVE JOBS AUTOMATION: Intercept the browser and force the Install Prompt
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
-      // Prevent the old default silent background behavior
       e.preventDefault();
-      // Save the installation trigger event for immediate action
       setDeferredPrompt(e);
-      // Instantly reveal our premium auto-install banner on screen
-      setShowInstallBanner(true);
+      // Failsafe: Open the install availability channel immediately on the UI canvas
+      setIsInstallAvailable(true);
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // If the app is already successfully installed, hide the banner automatically
+    // If already launched inside standalone installed mode, hide install buttons
     if (window.matchMedia('(display-mode: standalone)').matches) {
-      setShowInstallBanner(false);
+      setIsInstallAvailable(false);
     }
 
     return () => {
@@ -39,18 +36,18 @@ function App() {
   }, []);
 
   const triggerNativeInstallApp = async () => {
-    if (!deferredPrompt) return;
+    if (!deferredPrompt) {
+      // If the browser hidden prompt hasn't fired yet, give clear instructions
+      alert("To install: Tap the 3 vertical dots in the top-right corner of Chrome, then select 'Add to Home screen'.");
+      return;
+    }
     
-    // Force the phone to immediately display its native "Install App" pop-up panel
     deferredPrompt.prompt();
-    
-    // Wait for the user to click "Install"
     const { outcome } = await deferredPrompt.userChoice;
     console.log(`User installation decision: ${outcome}`);
     
-    // Clear out the saved prompt tracker and clear the banner
     setDeferredPrompt(null);
-    setShowInstallBanner(false);
+    setIsInstallAvailable(false);
   };
 
   const startRecording = async () => {
@@ -110,9 +107,9 @@ function App() {
           }
 
         } catch (error) {
-          console.error("Backend Server communication failed:", error);
+          console.error("Backend failed:", error);
           setProcessingStatus('');
-          setAiResponse("Could not reach the backend memory ledger.");
+          setAiResponse("Could not reach backend memory ledger.");
         }
 
         stream.getTracks().forEach(track => track.stop());
@@ -136,35 +133,23 @@ function App() {
   return (
     <div className="fixed inset-0 bg-white flex flex-col justify-between p-6 overflow-hidden select-none">
       
-      {/* AUTOMATIC TOP-NOTIFICATION INSTALLATION BANNER */}
-      {showInstallBanner && (
-        <div className="w-full max-w-4xl mx-auto bg-black text-white px-4 py-3 rounded-xl flex items-center justify-between shadow-lg animate-bounce mb-2">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-gray-800 rounded-lg">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-white">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-xs font-semibold tracking-wide">Install Voice Ledger App</p>
-              <p className="text-[11px] text-gray-400">Add icon to your Home Screen instantly</p>
-            </div>
-          </div>
-          <button 
+      {/* BRANDING & UTILITY ROW */}
+      <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-center pt-4 gap-4">
+        <div className="flex flex-col items-start">
+          <h1 className="text-xl font-semibold text-black tracking-tight">
+            Voice Memory Ledger
+          </h1>
+          
+          {/* ALWAYS ACCESSIBLE MANUAL APP INSTALLATION ACTION BUTTON */}
+          <button
             onClick={triggerNativeInstallApp}
-            className="bg-white text-black px-4 py-1.5 rounded-lg text-xs font-bold active:scale-95 transition-transform"
+            className="mt-1 flex items-center space-x-1.5 text-xs font-semibold text-gray-500 bg-gray-100 hover:bg-black hover:text-white px-2.5 py-1 rounded-full border border-gray-200 shadow-sm transition-all"
           >
-            Install Now
+            <span>📱 Install to Phone Screen</span>
           </button>
         </div>
-      )}
 
-      {/* BRANDING ROW */}
-      <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-start pt-4 gap-4">
-        <h1 className="text-xl font-semibold text-black tracking-tight">
-          Voice Memory Ledger
-        </h1>
-        <div className="w-full max-w-xs mx-auto md:mx-0 flex flex-col items-center">
+        <div className="w-full max-w-xs flex flex-col items-center">
           <input 
             type="text" 
             value={name} 
