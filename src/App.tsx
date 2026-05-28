@@ -7,8 +7,10 @@ function App() {
   const [displayType, setDisplayType] = useState(''); 
   const [aiResponse, setAiResponse] = useState('');
   const [processingStatus, setProcessingStatus] = useState('');
+  
+  // NEW: Direct error visibility state
+  const [errorMessage, setErrorMessage] = useState('');
 
-  // PWA Automated & Manual Installation State Trackers
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isInstallAvailable, setIsInstallAvailable] = useState(false);
 
@@ -21,37 +23,16 @@ function App() {
       setDeferredPrompt(e);
       setIsInstallAvailable(true);
     };
-
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setIsInstallAvailable(false);
-    }
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
-
-  const triggerNativeInstallApp = async () => {
-    if (!deferredPrompt) {
-      alert("To install: Tap the 3 vertical dots in the top-right corner of Chrome, then select 'Add to Home screen'.");
-      return;
-    }
-    
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`User installation decision: ${outcome}`);
-    
-    setDeferredPrompt(null);
-    setIsInstallAvailable(false);
-  };
 
   const startRecording = async () => {
     setDisplayText('');
     setAiResponse('');
     setDisplayType('');
     setProcessingStatus('');
+    setErrorMessage(''); // Clear past errors
     audioChunksRef.current = [];
 
     try {
@@ -60,9 +41,7 @@ function App() {
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
       mediaRecorder.onstop = async () => {
@@ -72,54 +51,46 @@ function App() {
         formData.append('name', name || 'Anonymous');
 
         try {
-          setProcessingStatus("Transcribing voice frequency...");
+          setProcessingStatus("Connecting to live memory ledger...");
           
-          const statusInterval = setInterval(() => {
-            setProcessingStatus((prev) => {
-              if (prev === "Transcribing voice frequency...") return "Detecting language script...";
-              if (prev === "Detecting language script...") return "Running cross-language vector match...";
-              if (prev === "Running cross-language vector match...") return "Updating SQL database ledger...";
-              return prev;
-            });
-          }, 2000);
-
           const BACKEND_URL = 'https://ai-voice-diary.onrender.com';
           const response = await fetch(`${BACKEND_URL}/api/process-voice`, {
             method: 'POST',
             body: formData,
           });
 
-          clearInterval(statusInterval);
-          setProcessingStatus('');
+          if (!response.ok) {
+            throw new Error(`Server returned status code ${response.status}`);
+          }
 
           const data = await response.json();
-          console.log("Synchronized Response Payload:", data);
+          console.log("Database Response Payload:", data);
 
-          // Force the transcription view to show the beautifully cleaned script
           const spokenText = data.transcription || "";
           setDisplayText(spokenText);
 
-          // FIX RULE: We now trust the backend decision engine ("query" vs "store") directly!
           if (data.type === "query") {
             setDisplayType('query');
-            setAiResponse(data.reply || "No direct memory trace found.");
+            setAiResponse(data.reply || "No matching memory trace found.");
           } else {
             setDisplayType('store');
           }
 
-        } catch (error) {
-          console.error("Backend communication failure:", error);
+        } catch (error: any) {
+          console.error("Network Link Failure:", error);
           setProcessingStatus('');
-          setAiResponse("Could not reach backend memory ledger.");
+          setDisplayType('error');
+          setErrorMessage(error.message || "Network timeout or connection lost.");
+          setDisplayText("Connection Mismatch");
         }
 
+        setProcessingStatus('');
         stream.getTracks().forEach(track => track.stop());
       };
 
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err) {
-      console.error(err);
       alert("Please allow microphone permissions.");
     }
   };
@@ -134,34 +105,19 @@ function App() {
   return (
     <div className="fixed inset-0 bg-white flex flex-col justify-between p-6 overflow-hidden select-none">
       
-      {/* BRANDING & UTILITY ROW */}
+      {/* TITLE ROW */}
       <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-center pt-4 gap-4">
-        <div className="flex flex-col items-start">
-          <h1 className="text-xl font-semibold text-black tracking-tight">
-            Voice Memory Ledger
-          </h1>
-          <button
-            onClick={triggerNativeInstallApp}
-            className="mt-1 flex items-center space-x-1.5 text-xs font-semibold text-gray-500 bg-gray-100 hover:bg-black hover:text-white px-2.5 py-1 rounded-full border border-gray-200 shadow-sm transition-all"
-          >
-            <span>📱 Install to Phone Screen</span>
-          </button>
-        </div>
-
-        <div className="w-full max-w-xs flex flex-col items-center">
-          <input 
-            type="text" 
-            value={name} 
-            onChange={(e) => setName(e.target.value)}
-            className="w-full p-2 border-b-2 border-gray-300 text-center focus:outline-none focus:border-black text-lg font-medium text-black bg-transparent"
-          />
-          <span className="text-xs text-gray-400 mt-1 tracking-wide">
-            type your name
-          </span>
-        </div>
+        <h1 className="text-xl font-semibold text-black tracking-tight">Voice Memory Ledger</h1>
+        <input 
+          type="text" 
+          value={name} 
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Type name"
+          className="p-2 border-b-2 border-gray-300 text-center focus:outline-none focus:border-black text-lg font-medium text-black bg-transparent"
+        />
       </div>
 
-      {/* CORE ENGINE CANVAS */}
+      {/* CORE MIC CANVAS */}
       <div className="flex-1 flex flex-col items-center justify-center w-full">
         <button 
           onClick={isRecording ? stopRecording : startRecording}
@@ -174,23 +130,23 @@ function App() {
           </svg>
         </button>
         
-        <p className="text-gray-500 text-sm mt-4 tracking-wide font-medium">
-          {isRecording ? 'Recording... Tap to Stop' : 'Press the MIC & speak'}
+        <p className="text-gray-500 text-sm mt-4 font-medium">
+          {isRecording ? 'Recording... Tap to Stop' : 'Press MIC & speak'}
         </p>
 
-        {/* LIVE PROCESSING STATUS LOADER */}
+        {/* PROCESSING STATUS */}
         {processingStatus && (
-          <div className="mt-8 flex flex-col items-center space-y-3">
+          <div className="mt-8 flex flex-col items-center space-y-2">
             <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin"></div>
-            <p className="text-sm font-medium text-black tracking-wide bg-gray-100 px-4 py-1.5 rounded-full border border-gray-200 shadow-sm">
+            <p className="text-sm font-medium text-black bg-gray-100 px-4 py-1.5 rounded-full border shadow-sm">
               {processingStatus}
             </p>
           </div>
         )}
 
-        {/* COMPLETED RESPONSE BOARD */}
+        {/* SCRIPT FEEDBACK PANEL */}
         {displayText && !processingStatus && (
-          <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-100 text-center shadow-sm">
+          <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border text-center shadow-sm">
             {displayType === 'store' && (
               <p className="text-gray-700 text-sm font-medium">
                 Stored successfully: <span className="text-black italic font-semibold">"{displayText}"</span>
@@ -198,30 +154,25 @@ function App() {
             )}
 
             {displayType === 'query' && (
-              <div className="space-y-2 animate-fade-in">
-                <p className="text-gray-400 text-xs tracking-wide uppercase font-semibold">Question</p>
+              <div className="space-y-2">
+                <p className="text-gray-400 text-xs uppercase font-semibold">Question</p>
                 <p className="text-gray-900 text-sm font-medium italic">"{displayText}"</p>
                 <div className="w-8 border-t-2 border-black mx-auto my-2"></div>
-                <p className="text-gray-400 text-xs tracking-wide uppercase font-semibold pt-1">Answer</p>
-                <p className="text-black text-base font-bold tracking-tight">{aiResponse}</p>
+                <p className="text-gray-400 text-xs uppercase font-semibold">Answer</p>
+                <p className="text-black text-base font-bold">{aiResponse}</p>
+              </div>
+            )}
+
+            {displayType === 'error' && (
+              <div className="space-y-1 text-red-600">
+                <p className="text-xs uppercase font-bold tracking-wide">Network Connection Error</p>
+                <p className="text-sm font-medium bg-red-50 p-2 rounded-lg border border-red-200">{errorMessage}</p>
+                <p className="text-[11px] text-gray-500 pt-1">Make sure your Render backend service is completely awake and running.</p>
               </div>
             )}
           </div>
         )}
-
-        {/* ONBOARDING PROMPTS CARD */}
-        {!isRecording && !displayText && !processingStatus && (
-          <div className="mt-6 flex flex-col items-center text-center text-xs text-gray-400 space-y-1 bg-gray-50 px-4 py-3 rounded-xl border border-gray-100 min-w-[240px]">
-            <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px] mb-1">Example</span>
-            <span>"My clothes are in the cupboard"</span>
-            <span className="italic text-gray-400 text-[11px]">then later ask...</span>
-            <span>"Where are my clothes?"</span>
-            <div className="w-full border-t border-gray-200 my-2"></div>
-            <span className="text-gray-500 font-medium tracking-wide">speak in Marathi or English</span>
-          </div>
-        )}
       </div>
-
       <div className="h-6"></div>
     </div>
   );
