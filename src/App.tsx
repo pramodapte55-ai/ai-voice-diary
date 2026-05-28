@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 
-// TypeScript declaration for global browser Speech tools
 declare global {
   interface Window {
     SpeechRecognition: any;
@@ -9,16 +8,11 @@ declare global {
 }
 
 function App() {
-  // 1. Core State Variables (Preserved safely so your typed name never disappears)
   const [name, setName] = useState('');
   const [isRecording, setIsRecording] = useState(false);
-  
-  // 2. Variables that hold dynamic speech data
   const [displayText, setDisplayText] = useState('');
   const [displayType, setDisplayType] = useState(''); // 'store' or 'query'
   const [aiResponse, setAiResponse] = useState('');
-
-  // 3. Microphone Recognition Engine Instance
   const [recognition, setRecognition] = useState<any>(null);
 
   useEffect(() => {
@@ -27,27 +21,26 @@ function App() {
       const rec = new SpeechRecognition();
       rec.continuous = false;
       rec.interimResults = false;
-      rec.lang = 'en-IN'; // Configured for regional Indian phonetic accents (English, Hindi, Marathi syntax)
+      rec.lang = 'en-IN'; 
 
-      // When the microphone successfully catches your voice:
       rec.onresult = async (event: any) => {
         const spokenText = event.results[0][0].transcript;
         setDisplayText(spokenText);
 
         const lowerText = spokenText.toLowerCase();
-        const isQuery = lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय');
+        // Check if the user is asking a question or making a statement
+        const isQuery = lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय') || lowerText.includes('कहाँ');
         setDisplayType(isQuery ? 'query' : 'store');
 
         try {
-          // --- LIVE RENDER BACKEND SQL BRIDGE ---
-          // NOTE: Replace the string placeholder below with your actual live Render dashboard web address!
+          // --- CHANGE THIS LINK TO YOUR ACTUAL RENDER LINK IF AVAILABLE ---
           const BACKEND_URL = 'https://YOUR-RENDER-BACKEND-URL.onrender.com';
           
           const response = await fetch(`${BACKEND_URL}/api/voice`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-              name: name || 'Anonymous', // Transmits the typed name safely to partition your database entries
+              name: name || 'Anonymous', 
               text: spokenText,
               type: isQuery ? 'query' : 'store'
             })
@@ -56,73 +49,51 @@ function App() {
           const data = await response.json();
 
           if (isQuery) {
-            setAiResponse(data.reply || data.answer || "No matching memory trace found in your ledger index.");
+            // Flexible check for different database server response names (reply, answer, response, message)
+            const liveAnswer = data.reply || data.answer || data.response || data.message || data.text;
+            setAiResponse(liveAnswer || "No matching memory found in your ledger.");
           }
         } catch (error) {
-          console.error("Render Bridge Network Error:", error);
-          // Local fallback simulation so your presentations remain flawless even if the server sleeps
+          console.error("Database connection missing:", error);
+          // If connection fails, print a clean statement instead of simulation text
           if (isQuery) {
-            setAiResponse(`[Simulation Mode] Pulling from SQL. Your item matching "${spokenText}" was successfully logged.`);
+            setAiResponse("Connecting to live database... (Make sure your Render backend link is updated in App.tsx)");
           }
         }
       };
 
-      rec.onerror = (e: any) => {
-        console.error("Speech Engine Error:", e);
-        setIsRecording(false);
-      };
-
-      rec.onend = () => {
-        setIsRecording(false);
-      };
-
+      rec.onerror = () => setIsRecording(false);
+      rec.onend = () => setIsRecording(false);
       setRecognition(rec);
     }
-  }, [name]); // Re-binds dynamically if name updates so the latest name state is always processed
+  }, [name]); 
 
-  // 4. Clean, Continuous Interaction Loops
   const startRecording = () => {
-    // Only wipe the conversational displays—leave the Name variable untouched!
     setDisplayText('');
     setAiResponse('');
     setDisplayType('');
     setIsRecording(true);
-
     if (recognition) {
-      try {
-        recognition.start();
-      } catch (err) {
-        console.log("Mic engine already active:", err);
-      }
-    } else {
-      alert("Microphone capture access is restricted or unsupported on this platform instance.");
+      try { recognition.start(); } catch (err) { console.log(err); }
     }
   };
 
   const stopRecording = () => {
     setIsRecording(false);
-    if (recognition) {
-      recognition.stop();
-    }
+    if (recognition) recognition.stop();
   };
 
-  // 5. The Locked Premium UI Framework Layout
   return (
     <div className="fixed inset-0 bg-white flex flex-col justify-between p-6 overflow-hidden select-none">
       
-      {/* TOP ROW: Title on Left, Name Input + Label Centered */}
+      {/* TOP ROW: Title and Name Box */}
       <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-start pt-4 gap-4">
-        
-        {/* Top Left Title */}
         <h1 className="text-xl font-semibold text-black tracking-tight">
           Voice Memory Ledger
         </h1>
-
-        {/* Centered Name Input (Bound strictly to persistent state variables) */}
         <div className="w-full max-w-xs mx-auto md:mx-0 flex flex-col items-center">
           <input 
             type="text" 
-            placeholder="" 
             value={name} 
             onChange={(e) => setName(e.target.value)}
             className="w-full p-2 border-b-2 border-gray-300 text-center focus:outline-none focus:border-black text-lg font-medium text-black bg-transparent"
@@ -131,10 +102,9 @@ function App() {
             type your name
           </span>
         </div>
-        
       </div>
 
-      {/* CENTER: The Giant Locked Speaker/Mic Symbol + Instructions */}
+      {/* CENTER: Mic Button and Clean Output */}
       <div className="flex-1 flex flex-col items-center justify-center w-full">
         <button 
           onClick={isRecording ? stopRecording : startRecording}
@@ -147,12 +117,11 @@ function App() {
           </svg>
         </button>
         
-        {/* Primary Action Text */}
         <p className="text-gray-500 text-sm mt-4 tracking-wide font-medium">
           {isRecording ? 'Recording... Tap to Stop' : 'Press the MIC & speak'}
         </p>
 
-        {/* THE QUESTION & ANSWER DISPLAY UNIT */}
+        {/* CLEAN DISPLAYS WITHOUT EXTRA TEXT */}
         {displayText && (
           <div className="mt-6 max-w-md w-full px-6 py-4 bg-gray-50 rounded-2xl border border-gray-100 text-center">
             {displayType === 'store' && (
@@ -173,7 +142,7 @@ function App() {
           </div>
         )}
 
-        {/* Neatly Centered Conversational Examples (Hidden when text is active) */}
+        {/* Examples block */}
         {!isRecording && !displayText && (
           <div className="mt-6 flex flex-col items-center text-center text-xs text-gray-400 space-y-1 bg-gray-50 px-4 py-3 rounded-xl border border-gray-100 min-w-[240px]">
             <span className="font-semibold text-gray-500 uppercase tracking-wider text-[10px] mb-1">Example</span>
@@ -186,13 +155,9 @@ function App() {
         )}
       </div>
 
-      {/* BOTTOM: Minimal balancing space */}
       <div className="h-6"></div>
-
     </div>
   );
 }
 
 export default App;
-
-// Build Fix May 27
