@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 function App() {
   const [name, setName] = useState('');
@@ -6,11 +6,52 @@ function App() {
   const [displayText, setDisplayText] = useState('');
   const [displayType, setDisplayType] = useState(''); 
   const [aiResponse, setAiResponse] = useState('');
-  // New State tracker to show immediate visual feedback during network lag
   const [processingStatus, setProcessingStatus] = useState('');
+
+  // PWA Automatic Installation State Trackers
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+
+  // STEVE JOBS AUTOMATION: Intercept the browser and force the Install Prompt
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      // Prevent the old default silent background behavior
+      e.preventDefault();
+      // Save the installation trigger event for immediate action
+      setDeferredPrompt(e);
+      // Instantly reveal our premium auto-install banner on screen
+      setShowInstallBanner(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // If the app is already successfully installed, hide the banner automatically
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setShowInstallBanner(false);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const triggerNativeInstallApp = async () => {
+    if (!deferredPrompt) return;
+    
+    // Force the phone to immediately display its native "Install App" pop-up panel
+    deferredPrompt.prompt();
+    
+    // Wait for the user to click "Install"
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User installation decision: ${outcome}`);
+    
+    // Clear out the saved prompt tracker and clear the banner
+    setDeferredPrompt(null);
+    setShowInstallBanner(false);
+  };
 
   const startRecording = async () => {
     setDisplayText('');
@@ -37,10 +78,8 @@ function App() {
         formData.append('name', name || 'Anonymous');
 
         try {
-          // STEVE JOBS FEEDBACK HUB: Instantly tell the user the file is safe and uploading
           setProcessingStatus("Transcribing voice frequency...");
           
-          // Small staggered interval updates to show the engine is actively thinking
           const statusInterval = setInterval(() => {
             setProcessingStatus((prev) => {
               if (prev === "Transcribing voice frequency...") return "Detecting language script...";
@@ -57,23 +96,15 @@ function App() {
           });
 
           clearInterval(statusInterval);
-          setProcessingStatus(''); // Clear status once data arrives cleanly
+          setProcessingStatus('');
 
           const data = await response.json();
-          console.log("Raw Server Response Payload:", data);
-
-          const spokenText = data.transcription || data.text || data.input || "";
+          const spokenText = data.transcription || "";
           setDisplayText(spokenText);
 
-          const lowerText = spokenText.toLowerCase();
-          // Smart multi-lingual query keyword detection rule
-          const isQuery = lowerText.includes('where') || lowerText.includes('what') || lowerText.includes('who') || lowerText.includes('how') || lowerText.includes('कुठे') || lowerText.includes('काय') || lowerText.includes('कहाँ') || lowerText.includes('कोण');
-
-          const serverAnswer = data.reply || data.answer || data.response || data.message || data.aiResponse || data.output;
-
-          if (isQuery) {
+          if (data.type === "query") {
             setDisplayType('query');
-            setAiResponse(serverAnswer || "No direct memory trace found.");
+            setAiResponse(data.reply || "No direct memory trace found.");
           } else {
             setDisplayType('store');
           }
@@ -105,6 +136,29 @@ function App() {
   return (
     <div className="fixed inset-0 bg-white flex flex-col justify-between p-6 overflow-hidden select-none">
       
+      {/* AUTOMATIC TOP-NOTIFICATION INSTALLATION BANNER */}
+      {showInstallBanner && (
+        <div className="w-full max-w-4xl mx-auto bg-black text-white px-4 py-3 rounded-xl flex items-center justify-between shadow-lg animate-bounce mb-2">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-gray-800 rounded-lg">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-white">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs font-semibold tracking-wide">Install Voice Ledger App</p>
+              <p className="text-[11px] text-gray-400">Add icon to your Home Screen instantly</p>
+            </div>
+          </div>
+          <button 
+            onClick={triggerNativeInstallApp}
+            className="bg-white text-black px-4 py-1.5 rounded-lg text-xs font-bold active:scale-95 transition-transform"
+          >
+            Install Now
+          </button>
+        </div>
+      )}
+
       {/* BRANDING ROW */}
       <div className="w-full max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-start pt-4 gap-4">
         <h1 className="text-xl font-semibold text-black tracking-tight">
@@ -140,10 +194,9 @@ function App() {
           {isRecording ? 'Recording... Tap to Stop' : 'Press the MIC & speak'}
         </p>
 
-        {/* LIVE PROCESSING STATUS LOADER (STEVE JOBS MINIMALIST INDICATOR) */}
+        {/* LIVE PROCESSING STATUS LOADER */}
         {processingStatus && (
-          <div className="mt-8 flex flex-col items-center space-y-3 animate-fade-in">
-            {/* Spinning clean minimalist ring indicator */}
+          <div className="mt-8 flex flex-col items-center space-y-3">
             <div className="w-6 h-6 border-2 border-gray-200 border-t-black rounded-full animate-spin"></div>
             <p className="text-sm font-medium text-black tracking-wide bg-gray-100 px-4 py-1.5 rounded-full border border-gray-200 shadow-sm">
               {processingStatus}
