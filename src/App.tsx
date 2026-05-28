@@ -1,11 +1,9 @@
 import React, { useState } from 'react';
 
 function App() {
-  // Restoring the foundational state variables for the UI hooks
   const [name, setName] = useState('');
   const [isRecording, setIsRecording] = useState(false);
 
-  // Hollow functions to handle microphone toggle safely
   const startRecording = () => {
     setIsRecording(true);
   };
