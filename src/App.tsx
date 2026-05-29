@@ -15,7 +15,7 @@ function App() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // Listen for mobile installation capability
+  // Capture the native mobile browser installation prompt capability
   useEffect(() => {
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -54,7 +54,7 @@ function App() {
         formData.append('name', userName);
 
         try {
-          // FIXED: Pointing directly to your verified active live Render database endpoint
+          // Connected directly to your active live Render database endpoint
           const response = await fetch('https://ai-voice-diary.onrender.com/api/record', {
             method: 'POST',
             body: formData,
@@ -62,23 +62,23 @@ function App() {
 
           const data = await response.json();
           if (response.ok) {
-            setStatusMessage('Voice memory saved and ledger queried successfully!');
+            setStatusMessage('Voice memory saved and database pipeline ledger updated!');
             setApiResponse(data);
           } else {
-            setStatusMessage(`Server error: ${data.error || response.statusText}`);
+            setStatusMessage(`Server error response: ${data.error || response.statusText}`);
           }
         } catch (error) {
           console.error(error);
-          setStatusMessage('Network communication error occurred.');
+          setStatusMessage('Network communication connection exception occurred.');
         }
       };
 
       mediaRecorder.start();
       setIsRecording(true);
-      setStatusMessage('Recording voice note...');
+      setStatusMessage('Recording voice note matrix input...');
     } catch (err) {
       console.error('Microphone access denied:', err);
-      setStatusMessage('Error: Could not access microphone.');
+      setStatusMessage('Error: Could not access microphone hardware input.');
     }
   };
 
@@ -91,62 +91,65 @@ function App() {
   };
 
   return (
-    <div style={{ padding: '30px 20px', fontFamily: 'sans-serif', maxWidth: '500px', margin: '0 auto' }}>
-      <h2>🎙️ AI Voice Diary Ledger</h2>
+    <div style={{ padding: '30px 20px', fontFamily: 'sans-serif', maxWidth: '500px', margin: '0 auto', background: '#ffffff', minHeight: '100vh' }}>
+      <h2 style={{ color: '#1e3a8a', display: 'flex', alignItems: 'center', gap: '10px', margin: '0 0 10px 0' }}>🎙️ AI Voice Diary Ledger</h2>
       
-      {/* ADDED: 3-line user instructions */}
-      <div style={{ background: '#fcf8e3', border: '1px solid #fbeed5', padding: '12px', borderRadius: '6px', fontSize: '14px', color: '#c09853', marginBottom: '15px' }}>
-        <p style={{ margin: '0 0 5px 0' }}>1. Enter your name in the block parameter control input box below.</p>
-        <p style={{ margin: '0 0 5px 0' }}>2. Tap 'Start Recording' and log your data or query your logs verbally.</p>
-        <p style={{ margin: 0 }}>3. Press 'Stop & Save Note' to synchronize and read the data engine matrix matrix response.</p>
+      {/* 3-Line Operational User Guidance Instructions */}
+      <div style={{ background: '#fef9c3', border: '1px solid #fef08a', padding: '15px', borderRadius: '8px', fontSize: '14px', color: '#713f12', marginBottom: '20px', lineHeight: '1.5' }}>
+        <div style={{ marginBottom: '6px' }}><strong>1.</strong> Enter your identification name context in the control parameter field block below.</div>
+        <div style={{ marginBottom: '6px' }}><strong>2.</strong> Tap <strong>Start Recording</strong> and state your clinical log, system query, or data parameter entry.</div>
+        <div><strong>3.</strong> Press <strong>Stop & Save Note</strong> to write changes directly to the cloud architecture matrix.</div>
       </div>
 
-      {/* ADDED: Dynamic Name input element */}
-      <div style={{ marginBottom: '15px' }}>
-        <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '5px' }}>User Context Name:</label>
+      {/* Dynamic Identity Parameter Context Block */}
+      <div style={{ marginBottom: '20px' }}>
+        <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>User Parameter Context Name:</label>
         <input 
           type="text" 
           value={userName} 
           onChange={(e) => setUserName(e.target.value)}
-          style={{ width: '100%', padding: '10px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '5px', fontSize: '16px' }}
+          style={{ width: '100%', padding: '12px', boxSizing: 'border-box', border: '2px solid #cbd5e1', borderRadius: '6px', fontSize: '16px', outline: 'none' }}
         />
       </div>
 
-      {/* ADDED: Smart Native App Installer target banner */}
+      {/* Direct Android Native App Installation Hook Button */}
       {installPrompt && (
         <button 
           onClick={triggerAppInstall}
-          style={{ width: '100%', padding: '12px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer', marginBottom: '15px' }}
+          style={{ width: '100%', padding: '14px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', marginBottom: '20px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
         >
-          📲 Click to Install AI Voice Diary App
+          📲 Click to Install AI Voice Diary App Icon
         </button>
       )}
       
-      <div style={{ margin: '15px 0', padding: '15px', background: '#f3f4f6', borderRadius: '8px' }}>
-        <strong>Status:</strong> {statusMessage}
+      {/* Dynamic Status Engine Monitor Box */}
+      <div style={{ margin: '0 0 20px 0', padding: '15px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '15px' }}>
+        <span style={{ fontWeight: 'bold', color: '#64748b' }}>System Status:</span> <span style={{ color: '#0f172a', fontWeight: 500 }}>{statusMessage}</span>
       </div>
 
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+      {/* Action Trigger Elements */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '25px' }}>
         <button 
           onClick={startRecording} 
           disabled={isRecording}
-          style={{ flex: 1, padding: '12px', background: isRecording ? '#ccc' : '#22c55e', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}
+          style={{ flex: 1, padding: '14px', background: isRecording ? '#cbd5e1' : '#16a34a', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '16px', cursor: isRecording ? 'not-allowed' : 'pointer', transition: 'background 0.2s' }}
         >
           Start Recording
         </button>
         <button 
           onClick={stopRecording} 
           disabled={!isRecording}
-          style={{ flex: 1, padding: '12px', background: !isRecording ? '#ccc' : '#ef4444', color: 'white', border: 'none', borderRadius: '5px', fontWeight: 'bold', cursor: 'pointer' }}
+          style={{ flex: 1, padding: '14px', background: !isRecording ? '#cbd5e1' : '#dc2626', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '16px', cursor: !isRecording ? 'not-allowed' : 'pointer', transition: 'background 0.2s' }}
         >
           Stop & Save Note
         </button>
       </div>
 
+      {/* Synchronized Database Pipeline Engine Output Display Matrix */}
       {apiResponse && (
         <div style={{ padding: '15px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px' }}>
-          <h4 style={{ margin: '0 0 10px 0' }}>Server Response Matrix:</h4>
-          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, background: '#fff', padding: '10px', borderRadius: '4px', border: '1px solid #dbeafe' }}>
+          <h4 style={{ margin: '0 0 10px 0', color: '#1e40af' }}>Server Response Matrix:</h4>
+          <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0, background: '#ffffff', padding: '12px', borderRadius: '6px', border: '1px solid #dbeafe', fontFamily: 'monospace', fontSize: '13px', color: '#1e293b' }}>
             {JSON.stringify(apiResponse, null, 2)}
           </pre>
         </div>
